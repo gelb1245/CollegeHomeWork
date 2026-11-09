@@ -2,24 +2,54 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TelegramBotApi.Data;
 using TelegramBotApi.Models;
+using TelegramBotApi.Services;
 
 namespace TelegramBotApi.Controllers;
 
 public record MessageResponseDto(int Id, int ChatGroupId, long FromUserId, string Author, string Text, DateTime SentAt);
 public record CreateGroupDto(string Name, string? Description);
 public record CreateMessageDto(string Text, long? FromUserId);
+public record CreateUserDto(long TelegramId, string? Username, string? FullName, string Role);
 
 [ApiController]
 [Route("api/admin")]
 public class AdminController : ControllerBase
 {
     private readonly TelegramBotContext _db;
+    private readonly WhitelistService _whitelist;
     private readonly ILogger<AdminController> _log;
 
-    public AdminController(TelegramBotContext db, ILogger<AdminController> log)
+    public AdminController(TelegramBotContext db, WhitelistService whitelist, ILogger<AdminController> log)
     {
         _db = db;
+        _whitelist = whitelist;
         _log = log;
+    }
+
+    // ---------- User Info / Authentication for Mini App ----------
+    [HttpGet("me/{telegramId}")]
+    public async Task<IActionResult> GetCurrentUser(long telegramId)
+    {
+        var user = await _db.Users.FindAsync(telegramId);
+        if (user == null)
+        {
+            if (_whitelist.Contains(telegramId))
+            {
+                user = new User
+                {
+                    TelegramId = telegramId,
+                    Username = "Пользователь",
+                    Role = telegramId == WhitelistService.PrimaryOwnerId ? RoleType.Developer : RoleType.User
+                };
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync();
+            }
+            else
+            {
+                return NotFound(new { error = "Пользователь не найден в вайтлисте" });
+            }
+        }
+        return Ok(user);
     }
 
     // ---------- Groups ----------
@@ -82,11 +112,44 @@ public class AdminController : ControllerBase
         return NoContent();
     }
 
-    // ---------- Users / Roles ----------
+    // ---------- Users / Whitelist Management ----------
     [HttpGet("users")]
     public async Task<ActionResult<IEnumerable<User>>> GetUsers()
     {
-        return Ok(await _db.Users.ToListAsync());
+        return Ok(await _db.Users.OrderBy(u => u.Role).ToListAsync());
+    }
+
+    [HttpPost("user")]
+    public async Task<IActionResult> AddUser([FromBody] CreateUserDto dto)
+    {
+        if (dto.TelegramId <= 0) return BadRequest("Некорректный Telegram ID");
+
+        if (!Enum.TryParse<RoleType>(dto.Role, true, out var role))
+            role = RoleType.User;
+
+        _whitelist.Add(dto.TelegramId);
+
+        var existing = await _db.Users.FindAsync(dto.TelegramId);
+        if (existing == null)
+        {
+            existing = new User
+            {
+                TelegramId = dto.TelegramId,
+                Username = dto.Username ?? $"User_{dto.TelegramId}",
+                FullName = dto.FullName ?? dto.Username,
+                Role = role
+            };
+            _db.Users.Add(existing);
+        }
+        else
+        {
+            existing.Role = role;
+            if (!string.IsNullOrEmpty(dto.Username)) existing.Username = dto.Username;
+            if (!string.IsNullOrEmpty(dto.FullName)) existing.FullName = dto.FullName;
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
     }
 
     [HttpPatch("user/{telegramId}/role/{role}")]
@@ -94,11 +157,37 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FindAsync(telegramId);
         if (user == null) return NotFound("Пользователь не найден");
+
         if (!Enum.TryParse<RoleType>(role, true, out var newRole))
             return BadRequest("Некорректная роль. Допустимые: Developer, Admin, User");
+
+        // Primary owner cannot be demoted
+        if (telegramId == WhitelistService.PrimaryOwnerId && newRole != RoleType.Developer)
+            return BadRequest("Нельзя понизить роль главного владельца бота.");
+
         user.Role = newRole;
         await _db.SaveChangesAsync();
         return Ok(new { message = $"Роль пользователя {telegramId} изменена на {newRole}" });
+    }
+
+    [HttpDelete("user/{telegramId}")]
+    public async Task<IActionResult> DeleteUser(long telegramId)
+    {
+        if (telegramId == WhitelistService.PrimaryOwnerId)
+        {
+            return BadRequest("Нельзя удалить главного создателя бота.");
+        }
+
+        _whitelist.Remove(telegramId);
+
+        var user = await _db.Users.FindAsync(telegramId);
+        if (user != null)
+        {
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
+        }
+
+        return Ok(new { message = $"Пользователь {telegramId} удален из вайтлиста и системы." });
     }
 
     // ---------- Messages ----------
@@ -140,5 +229,16 @@ public class AdminController : ControllerBase
         _db.Messages.Add(msg);
         await _db.SaveChangesAsync();
         return Ok(msg);
+    }
+
+    [HttpDelete("message/{id}")]
+    public async Task<IActionResult> DeleteMessage(int id)
+    {
+        var msg = await _db.Messages.FindAsync(id);
+        if (msg == null) return NotFound();
+
+        _db.Messages.Remove(msg);
+        await _db.SaveChangesAsync();
+        return NoContent();
     }
 }

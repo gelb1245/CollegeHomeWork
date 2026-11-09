@@ -2,9 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>College Homework — Mini App</title>
-  <!-- Telegram WebApp Script -->
+  <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -14,37 +14,33 @@
     <header class="app-header">
       <div class="header-left">
         <button id="backBtn" class="icon-btn hidden" title="Назад">←</button>
-        <h1 id="headerTitle">Предметы и ДЗ</h1>
+        <div>
+          <h1 id="headerTitle">Предметы</h1>
+          <span id="userStatusSub" class="sub-status">Загрузка...</span>
+        </div>
       </div>
       <div class="header-right">
         <!-- Role switcher for web preview/testing -->
-        <select id="roleSelector" class="role-badge" title="Сменить роль для теста">
-          <option value="User">Роль: Студент</option>
-          <option value="Admin">Роль: Админ</option>
-          <option value="Developer">Роль: Разработчик</option>
+        <select id="roleSelector" class="role-badge" title="Сменить роль (тест)">
+          <option value="Developer">👨‍💻 Разработчик</option>
+          <option value="Admin">👑 Администратор</option>
+          <option value="User">🎓 Студент</option>
         </select>
       </div>
     </header>
 
-    <!-- Main Screens -->
+    <!-- Main Screens Container -->
     <main class="app-content">
-      <!-- Screen 1: Group list (Chats) -->
+      
+      <!-- SCREEN 1: Groups / Subjects List -->
       <section id="groupsScreen" class="screen active">
-        <div class="developer-panel hidden" id="devPanel">
-          <div class="dev-card">
-            <h3>⚡ Панель разработчика</h3>
-            <p>Управление предметами и группами чатов</p>
-            <div class="input-row">
-              <input type="text" id="newGroupName" placeholder="Название (напр. История, Всесвит, ДЗ)" />
-              <input type="text" id="newGroupDesc" placeholder="Описание предмета" />
-              <button id="createGroupBtn" class="btn primary-btn">+ Создать</button>
-            </div>
-          </div>
+        <div class="search-bar">
+          <input type="text" id="groupSearchInput" placeholder="🔍 Поиск предмета..." />
         </div>
 
-        <div class="groups-header">
-          <h2>Чаты предметов</h2>
-          <span id="groupsCount" class="counter">0 групп</span>
+        <div class="section-title-row">
+          <h2>Чаты предметов и ДЗ</h2>
+          <span id="groupsCounter" class="counter-badge">0</span>
         </div>
 
         <div id="groupsList" class="groups-list">
@@ -52,26 +48,120 @@
         </div>
       </section>
 
-      <!-- Screen 2: Chat Detail / Messages -->
+      <!-- SCREEN 2: Chat Detail / Messages Inside a Subject -->
       <section id="chatScreen" class="screen">
-        <div class="chat-info-bar">
+        <div class="chat-header-banner">
           <div>
-            <h2 id="currentChatName">Название предмета</h2>
+            <h2 id="currentChatName">Предмет</h2>
             <p id="currentChatDesc" class="chat-desc"></p>
+          </div>
+          <div id="chatAdminActions" class="chat-header-actions hidden">
+            <button id="deleteCurrentGroupBtn" class="danger-btn-sm" title="Удалить этот предмет">🗑️ Удалить предмет</button>
           </div>
         </div>
 
         <div id="messagesContainer" class="messages-container">
-          <div class="empty-state">Нет записей от преподавателей или старосты.</div>
+          <div class="empty-state">Нет записей по этому предмету.</div>
         </div>
 
-        <!-- Admin Input Area (Only visible to Admin) -->
-        <div id="adminPostArea" class="admin-input-bar hidden">
-          <textarea id="adminMessageInput" placeholder="Напишите задание или объявление..."></textarea>
-          <button id="sendMessageBtn" class="btn send-btn">Отправить</button>
+        <!-- Input Bar for Admin / Developer to post homework -->
+        <div id="adminPostArea" class="chat-input-bar hidden">
+          <textarea id="adminMessageInput" placeholder="Напишите задание, параграф, дедлайн..." rows="1"></textarea>
+          <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ">➤</button>
         </div>
       </section>
+
+      <!-- SCREEN 3: Users & Whitelist Management (Developer / Admin) -->
+      <section id="usersScreen" class="screen">
+        <div class="section-title-row">
+          <div>
+            <h2>Вайтлист и Участники</h2>
+            <p class="subtitle">Управление студентами, админами и разработчиками</p>
+          </div>
+          <button id="addUserModalBtn" class="btn primary-btn-sm">+ Добавить</button>
+        </div>
+
+        <div class="search-bar">
+          <input type="text" id="userSearchInput" placeholder="🔍 Поиск по имени или ID..." />
+        </div>
+
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-role="all">Все</button>
+          <button class="filter-tab" data-role="Developer">Разработчики</button>
+          <button class="filter-tab" data-role="Admin">Админы</button>
+          <button class="filter-tab" data-role="User">Студенты</button>
+        </div>
+
+        <div id="usersList" class="users-list">
+          <div class="loader">Загрузка участников...</div>
+        </div>
+      </section>
+
+      <!-- SCREEN 4: Manage Subjects (Developer) -->
+      <section id="settingsScreen" class="screen">
+        <div class="section-title-row">
+          <h2>Управление предметами</h2>
+        </div>
+
+        <div class="card add-card">
+          <h3>➕ Создать новый предмет</h3>
+          <p class="card-desc">Добавьте новый чат предмета (например: Физика, Высшая математика, Программирование)</p>
+          <div class="form-group">
+            <input type="text" id="newGroupName" placeholder="Название предмета" />
+            <input type="text" id="newGroupDesc" placeholder="Описание или контакты преподавателя" />
+            <button id="createGroupBtn" class="btn primary-btn">+ Создать предмет</button>
+          </div>
+        </div>
+      </section>
+
     </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-screen="groupsScreen">
+        <span class="nav-icon">📚</span>
+        <span class="nav-label">Предметы</span>
+      </button>
+      <button class="nav-item" id="navUsersTab" data-screen="usersScreen">
+        <span class="nav-icon">👥</span>
+        <span class="nav-label">Вайтлист</span>
+      </button>
+      <button class="nav-item" id="navSettingsTab" data-screen="settingsScreen">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">Настройки</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal: Add User Manually -->
+  <div id="addUserModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Добавить в вайтлист</h3>
+        <button id="closeModalBtn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Telegram ID:</label>
+          <input type="number" id="manualUserId" placeholder="Например: 1645991235" />
+        </div>
+        <div class="form-group">
+          <label>Имя или ник:</label>
+          <input type="text" id="manualUserName" placeholder="Иван Иванов (@ivan)" />
+        </div>
+        <div class="form-group">
+          <label>Роль в системе:</label>
+          <select id="manualUserRole">
+            <option value="User">🎓 Студент (только чтение)</option>
+            <option value="Admin">👑 Администратор (публикация ДЗ)</option>
+            <option value="Developer">👨‍💻 Разработчик (полный доступ)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="saveUserBtn" class="btn primary-btn">Сохранить</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

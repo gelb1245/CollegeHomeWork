@@ -24,6 +24,9 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Add Whitelist Service
+builder.Services.AddSingleton<WhitelistService>();
+
 // Configure Telegram Bot Client with user's token
 builder.Services.AddSingleton<ITelegramBotClient>(sp =>
 {
