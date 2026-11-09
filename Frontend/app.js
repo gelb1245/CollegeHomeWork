@@ -24,7 +24,7 @@ let currentRoleFilter = "all";
 const backBtn = document.getElementById("backBtn");
 const headerTitle = document.getElementById("headerTitle");
 const userStatusSub = document.getElementById("userStatusSub");
-const roleSelector = document.getElementById("roleSelector");
+const userRoleBadge = document.getElementById("userRoleBadge");
 
 const navItems = document.querySelectorAll(".nav-item");
 const navUsersTab = document.getElementById("navUsersTab");
@@ -105,15 +105,24 @@ function formatRoleName(roleNumOrStr) {
 
 // Sync Role UI (Permissions)
 function syncRoleUI() {
-  roleSelector.value = currentUser.role;
-
   let roleText = "🎓 Студент";
-  if (currentUser.role === "Developer") roleText = "👨‍💻 Разработчик (полный доступ)";
-  else if (currentUser.role === "Admin") roleText = "👑 Администратор";
+  let roleClass = "user";
+  if (currentUser.role === "Developer") {
+    roleText = "👨‍💻 Разработчик";
+    roleClass = "dev";
+  } else if (currentUser.role === "Admin") {
+    roleText = "👑 Администратор";
+    roleClass = "admin";
+  }
+
+  if (userRoleBadge) {
+    userRoleBadge.textContent = roleText;
+    userRoleBadge.className = `role-badge ${roleClass}`;
+  }
 
   userStatusSub.textContent = `${currentUser.username} • ${roleText}`;
 
-  // Hide or show bottom navigation tabs based on role
+  // Hide bottom navigation tabs for regular Students
   if (currentUser.role === "User") {
     navUsersTab.classList.add("hidden");
     navSettingsTab.classList.add("hidden");
@@ -121,33 +130,25 @@ function syncRoleUI() {
     navUsersTab.classList.remove("hidden");
     navSettingsTab.classList.add("hidden");
   } else {
-    // Developer
+    // Developer has full access
     navUsersTab.classList.remove("hidden");
     navSettingsTab.classList.remove("hidden");
   }
 
-  // Chat input
+  // Chat input (only for Admin and Developer)
   if ((currentUser.role === "Admin" || currentUser.role === "Developer") && currentGroupId) {
     adminPostArea.classList.remove("hidden");
   } else {
     adminPostArea.classList.add("hidden");
   }
 
-  // Chat delete subject button
+  // Chat delete subject button (only for Developer)
   if (currentUser.role === "Developer" && currentGroupId) {
     chatAdminActions.classList.remove("hidden");
   } else {
     chatAdminActions.classList.add("hidden");
   }
 }
-
-// Role selector event (for testing)
-roleSelector.addEventListener("change", (e) => {
-  currentUser.role = e.target.value;
-  syncRoleUI();
-  if (currentScreen === "usersScreen") renderUsersList(cachedUsers);
-  if (currentScreen === "chatScreen" && currentGroupId) loadMessages(currentGroupId);
-});
 
 // Navigation Bar
 navItems.forEach((btn) => {
