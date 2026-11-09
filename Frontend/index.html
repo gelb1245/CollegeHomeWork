@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>College Homework — Mini App</title>
+  <!-- Telegram WebApp Script -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <button id="backBtn" class="icon-btn hidden" title="Назад">←</button>
+        <h1 id="headerTitle">Предметы и ДЗ</h1>
+      </div>
+      <div class="header-right">
+        <!-- Role switcher for web preview/testing -->
+        <select id="roleSelector" class="role-badge" title="Сменить роль для теста">
+          <option value="User">Роль: Студент</option>
+          <option value="Admin">Роль: Админ</option>
+          <option value="Developer">Роль: Разработчик</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Main Screens -->
+    <main class="app-content">
+      <!-- Screen 1: Group list (Chats) -->
+      <section id="groupsScreen" class="screen active">
+        <div class="developer-panel hidden" id="devPanel">
+          <div class="dev-card">
+            <h3>⚡ Панель разработчика</h3>
+            <p>Управление предметами и группами чатов</p>
+            <div class="input-row">
+              <input type="text" id="newGroupName" placeholder="Название (напр. История, Всесвит, ДЗ)" />
+              <input type="text" id="newGroupDesc" placeholder="Описание предмета" />
+              <button id="createGroupBtn" class="btn primary-btn">+ Создать</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="groups-header">
+          <h2>Чаты предметов</h2>
+          <span id="groupsCount" class="counter">0 групп</span>
+        </div>
+
+        <div id="groupsList" class="groups-list">
+          <div class="loader">Загрузка предметов...</div>
+        </div>
+      </section>
+
+      <!-- Screen 2: Chat Detail / Messages -->
+      <section id="chatScreen" class="screen">
+        <div class="chat-info-bar">
+          <div>
+            <h2 id="currentChatName">Название предмета</h2>
+            <p id="currentChatDesc" class="chat-desc"></p>
+          </div>
+        </div>
+
+        <div id="messagesContainer" class="messages-container">
+          <div class="empty-state">Нет записей от преподавателей или старосты.</div>
+        </div>
+
+        <!-- Admin Input Area (Only visible to Admin) -->
+        <div id="adminPostArea" class="admin-input-bar hidden">
+          <textarea id="adminMessageInput" placeholder="Напишите задание или объявление..."></textarea>
+          <button id="sendMessageBtn" class="btn send-btn">Отправить</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+## Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Database (optional to commit or ignore; let's ignore lock files)
+*.db-shm
+*.db-wal
+
+## OS
+Thumbs.db
+.DS_Store
