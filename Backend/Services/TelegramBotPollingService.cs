@@ -78,9 +78,9 @@ public class TelegramBotPollingService : BackgroundService
             var me = await _botClient.GetMe(cancellationToken: stoppingToken);
             _logger.LogInformation("Бот успешно запущен: @{BotUsername} (ID: {BotId})", me.Username, me.Id);
 
-            // Set Chat Menu Button to open Mini App if URL configured
+            // Set Chat Menu Button to open Mini App if valid public HTTPS URL configured
             var webAppUrl = _config["Telegram:WebAppUrl"];
-            if (!string.IsNullOrWhiteSpace(webAppUrl))
+            if (IsValidTelegramWebAppUrl(webAppUrl))
             {
                 try
                 {
@@ -88,7 +88,7 @@ public class TelegramBotPollingService : BackgroundService
                         menuButton: new MenuButtonWebApp
                         {
                             Text = "📱 Открыть ДЗ",
-                            WebApp = new WebAppInfo { Url = webAppUrl }
+                            WebApp = new WebAppInfo { Url = webAppUrl! }
                         },
                         cancellationToken: stoppingToken
                     );
@@ -405,6 +405,15 @@ public class TelegramBotPollingService : BackgroundService
         }
     }
 
+    private static bool IsValidTelegramWebAppUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false;
+        if (url.Contains("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        if (url.Contains("127.0.0.1")) return false;
+        return true;
+    }
+
     private async Task SendAppWelcomeAsync(long userId, AppUser user)
     {
         string roleDesc = user.Role switch
@@ -417,11 +426,11 @@ public class TelegramBotPollingService : BackgroundService
         var webAppUrl = _config["Telegram:WebAppUrl"];
         var inlineButtons = new List<InlineKeyboardButton[]>();
 
-        if (!string.IsNullOrWhiteSpace(webAppUrl))
+        if (IsValidTelegramWebAppUrl(webAppUrl))
         {
             inlineButtons.Add(new[]
             {
-                InlineKeyboardButton.WithWebApp("🚀 Открыть приложение предметов и ДЗ", new WebAppInfo { Url = webAppUrl })
+                InlineKeyboardButton.WithWebApp("🚀 Открыть приложение предметов и ДЗ", new WebAppInfo { Url = webAppUrl! })
             });
         }
 
@@ -436,12 +445,23 @@ public class TelegramBotPollingService : BackgroundService
             ResizeKeyboard = true
         };
 
+        string welcomeText = $"👋 Привет, *{user.FullName ?? user.Username}*!\n\n" +
+                             $"👤 Твой статус: *{roleDesc}*\n\n" +
+                             $"📲 Все задания, чаты предметов и управление происходят внутри **Mini App**!\n";
+
+        if (IsValidTelegramWebAppUrl(webAppUrl))
+        {
+            welcomeText += "Нажмите кнопку **«🚀 Открыть приложение»** ниже, чтобы войти 👇";
+        }
+        else
+        {
+            welcomeText += $"🌐 Локальный адрес для входа в браузере:\n`http://localhost:5000`\n\n" +
+                           $"💡 Для того чтобы кнопка открывалась прямо внутри Telegram, подключите публичный URL (например, бесплатный хостинг Render).";
+        }
+
         await _botClient.SendMessage(
             chatId: userId,
-            text: $"👋 Привет, *{user.FullName ?? user.Username}*!\n\n" +
-                  $"👤 Твой статус: *{roleDesc}*\n\n" +
-                  $"📲 Все задания, чаты предметов и управление происходят внутри **Mini App**!\n" +
-                  $"Нажмите кнопку **«🚀 Открыть приложение»** ниже, чтобы войти 👇",
+            text: welcomeText,
             replyMarkup: inlineButtons.Count > 0 ? new InlineKeyboardMarkup(inlineButtons) : keyboardMarkup,
             parseMode: ParseMode.Markdown
         );

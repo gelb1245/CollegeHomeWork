@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================================
-echo  Запуск Telegram Homework Bot & Mini App Backend...
+echo  Запуск Telegram Homework Bot ^& Mini App Backend...
 echo ========================================================
 echo.
 echo Адрес сайта/Mini App:  http://localhost:5000/
