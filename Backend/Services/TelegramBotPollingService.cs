@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Telegram.Bot;
 using Telegram.Bot.Types;
@@ -15,19 +16,23 @@ public class TelegramBotPollingService : BackgroundService
     private readonly ITelegramBotClient _botClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly WhitelistService _whitelist;
+    private readonly TelegramRateLimiter _rateLimiter;
     private readonly IConfiguration _config;
     private readonly ILogger<TelegramBotPollingService> _logger;
+    private readonly SemaphoreSlim _concurrencySemaphore = new(10, 10);
 
     public TelegramBotPollingService(
         ITelegramBotClient botClient,
         IServiceScopeFactory scopeFactory,
         WhitelistService whitelist,
+        TelegramRateLimiter rateLimiter,
         IConfiguration config,
         ILogger<TelegramBotPollingService> logger)
     {
         _botClient = botClient;
         _scopeFactory = scopeFactory;
         _whitelist = whitelist;
+        _rateLimiter = rateLimiter;
         _config = config;
         _logger = logger;
     }
@@ -119,7 +124,7 @@ public class TelegramBotPollingService : BackgroundService
                 foreach (var update in updates)
                 {
                     offset = update.Id + 1;
-                    _ = ProcessUpdateAsync(update);
+                    _ = ProcessUpdateAsync(update, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -134,61 +139,87 @@ public class TelegramBotPollingService : BackgroundService
         }
     }
 
-    private async Task ProcessUpdateAsync(Update update)
+    private async Task ProcessUpdateAsync(Update update, CancellationToken cancellationToken)
     {
+        try
+        {
+            await _concurrencySemaphore.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         try
         {
             if (update.Type == UpdateType.Message && update.Message != null)
             {
-                await HandleMessageAsync(update.Message);
+                await HandleMessageAsync(update.Message, cancellationToken);
             }
             else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
             {
-                await HandleCallbackQueryAsync(update.CallbackQuery);
+                await HandleCallbackQueryAsync(update.CallbackQuery, cancellationToken);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ошибка обработки обновления");
         }
+        finally
+        {
+            _concurrencySemaphore.Release();
+        }
     }
 
-    private async Task HandleMessageAsync(Telegram.Bot.Types.Message message)
+    private async Task HandleMessageAsync(Telegram.Bot.Types.Message message, CancellationToken cancellationToken)
     {
         var from = message.From;
         if (from == null) return;
         long userId = from.Id;
 
+        // Anti-flood: Throttle aggressive spam / bot attacks
+        if (!_rateLimiter.CanProcessUserMessage(userId))
+        {
+            _logger.LogWarning("Сообщение от пользователя {UserId} проигнорировано (превышен лимит запросов / флуд)", userId);
+            return;
+        }
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TelegramBotContext>();
 
-        var user = await db.Users.FindAsync(userId);
+        var user = await db.Users.FindAsync(new object[] { userId }, cancellationToken);
 
         // 1. Check if user is in whitelist
         if (!_whitelist.Contains(userId))
         {
-            await _botClient.SendMessage(
-                chatId: userId,
-                text: $"⛔ *Доступ ограничен*\n\nВы не внесены в белый список колледжа.\nВаш ID: `{userId}`\n\nАдминистратор уже уведомлен о вашей попытке входа.",
-                parseMode: ParseMode.Markdown
-            );
-
-            // Notify Owner
-            var approveMarkup = new InlineKeyboardMarkup(new[]
+            // Only notify owner if cooldown expired to prevent notification DDoS
+            if (_rateLimiter.ShouldNotifyOwnerAboutUnauthorized(userId))
             {
-                new[]
-                {
-                    InlineKeyboardButton.WithCallbackData("✅ Добавить студента", $"wl_add_{userId}_User"),
-                    InlineKeyboardButton.WithCallbackData("👑 Сделать админом", $"wl_add_{userId}_Admin")
-                }
-            });
+                await _botClient.SendMessage(
+                    chatId: userId,
+                    text: $"⛔ *Доступ ограничен*\n\nВы не внесены в белый список колледжа.\nВаш ID: `{userId}`\n\nАдминистратор уже уведомлен о вашей попытке входа.",
+                    parseMode: ParseMode.Markdown,
+                    cancellationToken: cancellationToken
+                );
 
-            await _botClient.SendMessage(
-                chatId: WhitelistService.PrimaryOwnerId,
-                text: $"🔔 *Запрос доступа к боту:*\n• Имя: {from.FirstName} {from.LastName}\n• Ник: @{from.Username ?? "нет"}\n• Telegram ID: `{userId}`",
-                replyMarkup: approveMarkup,
-                parseMode: ParseMode.Markdown
-            );
+                // Notify Owner
+                var approveMarkup = new InlineKeyboardMarkup(new[]
+                {
+                    new[]
+                    {
+                        InlineKeyboardButton.WithCallbackData("✅ Добавить студента", $"wl_add_{userId}_User"),
+                        InlineKeyboardButton.WithCallbackData("👑 Сделать админом", $"wl_add_{userId}_Admin")
+                    }
+                });
+
+                await _botClient.SendMessage(
+                    chatId: WhitelistService.PrimaryOwnerId,
+                    text: $"🔔 *Запрос доступа к боту:*\n• Имя: {from.FirstName} {from.LastName}\n• Ник: @{from.Username ?? "нет"}\n• Telegram ID: `{userId}`",
+                    replyMarkup: approveMarkup,
+                    parseMode: ParseMode.Markdown,
+                    cancellationToken: cancellationToken
+                );
+            }
             return;
         }
 
@@ -315,11 +346,76 @@ public class TelegramBotPollingService : BackgroundService
 
         var text = message.Text?.Trim();
 
+        // 4. Handle /deadlines command
+        if (text?.StartsWith("/deadlines", StringComparison.OrdinalIgnoreCase) == true || text == "⏳ Мои дедлайны")
+        {
+            var upcoming = await db.Messages
+                .AsNoTracking()
+                .Include(m => m.Group)
+                .Where(m => m.Deadline != null)
+                .OrderBy(m => m.Deadline)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
+            if (upcoming.Count == 0)
+            {
+                await _botClient.SendMessage(userId, "🎉 Нет активных дедлайнов! Все задания сданы или дедлайн не назначен.", cancellationToken: cancellationToken);
+                return;
+            }
+
+            var messageIds = upcoming.Select(m => m.Id).ToList();
+            var completedIds = await db.UserTaskProgresses
+                .AsNoTracking()
+                .Where(p => p.UserId == userId && messageIds.Contains(p.MessageId) && p.IsCompleted)
+                .Select(p => p.MessageId)
+                .ToListAsync(cancellationToken);
+
+            var sb = new StringBuilder("⏳ *Ваши актуальные задания и дедлайны:*\n\n");
+            int total = upcoming.Count;
+            int done = completedIds.Count;
+
+            foreach (var m in upcoming)
+            {
+                bool isDone = completedIds.Contains(m.Id);
+                var dl = m.Deadline!.Value;
+                var dlStr = dl.ToString("dd.MM HH:mm");
+                var diff = dl - DateTime.UtcNow;
+                string urgency = isDone ? "✅ Сдано" :
+                                 diff.TotalHours < 0 ? "🔥 Просрочено!" :
+                                 diff.TotalHours < 24 ? "⚠️ Меньше 24ч!" :
+                                 $"осталось {(int)diff.TotalDays} дн.";
+
+                sb.AppendLine($"• *{m.Group?.Name}*: {m.Text}");
+                sb.AppendLine($"   Срок: `{dlStr}` ({urgency})\n");
+            }
+
+            sb.AppendLine($"📊 Выполнено: *{done} из {total}*");
+
+            var webAppUrl = _config["Telegram:WebAppUrl"];
+            InlineKeyboardMarkup? ikb = null;
+            if (IsValidTelegramWebAppUrl(webAppUrl))
+            {
+                ikb = new InlineKeyboardMarkup(new[]
+                {
+                    InlineKeyboardButton.WithWebApp("📱 Открыть задания в Mini App", new WebAppInfo { Url = webAppUrl! })
+                });
+            }
+
+            await _botClient.SendMessage(
+                chatId: userId,
+                text: sb.ToString(),
+                replyMarkup: ikb,
+                parseMode: ParseMode.Markdown,
+                cancellationToken: cancellationToken
+            );
+            return;
+        }
+
         // Send Mini App button & menu
         await SendAppWelcomeAsync(userId, user);
     }
 
-    private async Task HandleCallbackQueryAsync(CallbackQuery query)
+    private async Task HandleCallbackQueryAsync(CallbackQuery query, CancellationToken cancellationToken = default)
     {
         var data = query.Data;
         if (string.IsNullOrEmpty(data)) return;

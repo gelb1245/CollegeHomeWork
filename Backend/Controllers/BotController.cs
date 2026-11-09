@@ -1,67 +1,83 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using TelegramBotApi.Data;
+using TelegramBotApi.Models;
+using TelegramBotApi.Services;
 using AppUser = TelegramBotApi.Models.User;
 using AppMessage = TelegramBotApi.Models.Message;
-using TelegramBotApi.Models;
 
 namespace TelegramBotApi.Controllers;
 
 [ApiController]
 [Route("api/bot")]
+[EnableRateLimiting("strict-api")]
 public class BotController : ControllerBase
 {
     private readonly ITelegramBotClient _botClient;
     private readonly TelegramBotContext _db;
+    private readonly WhitelistService _whitelist;
+    private readonly TelegramRateLimiter _rateLimiter;
+    private readonly HomeworkNotificationService _notifications;
     private readonly ILogger<BotController> _log;
     private readonly IConfiguration _config;
-    private readonly HashSet<long> _whitelist;
 
-    public BotController(ITelegramBotClient botClient, TelegramBotContext db, IWebHostEnvironment env, IConfiguration config, ILogger<BotController> log)
+    public BotController(
+        ITelegramBotClient botClient,
+        TelegramBotContext db,
+        WhitelistService whitelist,
+        TelegramRateLimiter rateLimiter,
+        HomeworkNotificationService notifications,
+        IConfiguration config,
+        ILogger<BotController> log)
     {
         _botClient = botClient;
         _db = db;
+        _whitelist = whitelist;
+        _rateLimiter = rateLimiter;
+        _notifications = notifications;
         _config = config;
         _log = log;
-
-        var path = Path.Combine(env.ContentRootPath, "whitelist.json");
-        if (System.IO.File.Exists(path))
-        {
-            try
-            {
-                var json = System.IO.File.ReadAllText(path);
-                _whitelist = JsonSerializer.Deserialize<HashSet<long>>(json) ?? new();
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Failed to read whitelist.json");
-                _whitelist = new();
-            }
-        }
-        else
-        {
-            _whitelist = new();
-        }
     }
 
     [HttpPost("webhook")]
-    public async Task<IActionResult> Update([FromBody] Update update)
+    public async Task<IActionResult> Update([FromBody] Update? update, CancellationToken cancellationToken)
     {
-        var message = update.Message;
-        if (message?.From?.Id is not { } userId) return Ok();
-
-        // If whitelist has entries and userId is not in whitelist, reject
-        if (_whitelist.Count > 0 && !_whitelist.Contains(userId))
+        // 1. Verify Webhook Secret Token if configured to prevent spoofed/unauthorized updates
+        var expectedSecret = _config["Telegram:WebhookSecretToken"];
+        if (!string.IsNullOrWhiteSpace(expectedSecret))
         {
-            _log.LogInformation("User {UserId} is not in whitelist", userId);
+            if (!Request.Headers.TryGetValue("X-Telegram-Bot-Api-Secret-Token", out var receivedSecret) ||
+                receivedSecret != expectedSecret)
+            {
+                _log.LogWarning("Webhook запрос отклонён: неверный X-Telegram-Bot-Api-Secret-Token.");
+                return StatusCode(StatusCodes.Status403Forbidden, "Forbidden");
+            }
+        }
+
+        if (update?.Message is not { } message || message.From?.Id is not { } userId)
+        {
             return Ok();
         }
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.TelegramId == userId);
+        // 2. Anti-flood rate limiting
+        if (!_rateLimiter.CanProcessUserMessage(userId))
+        {
+            _log.LogWarning("Webhook update от пользователя {UserId} проигнорирован (флуд)", userId);
+            return Ok();
+        }
+
+        // 3. Whitelist verification
+        if (!_whitelist.Contains(userId))
+        {
+            _log.LogInformation("Пользователь {UserId} отсутствует в вайтлисте", userId);
+            return Ok();
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.TelegramId == userId, cancellationToken);
         if (user == null)
         {
             user = new AppUser
@@ -70,53 +86,72 @@ public class BotController : ControllerBase
                 Username = message.From.Username ?? message.From.FirstName ?? "Unknown"
             };
             _db.Users.Add(user);
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
         var text = message.Text?.Trim();
         if (string.IsNullOrEmpty(text)) return Ok();
 
-        if (user.Role == RoleType.Admin && text.StartsWith("/post"))
+        if ((user.Role == RoleType.Admin || user.Role == RoleType.Developer) && text.StartsWith("/post"))
         {
-            // Expected: /post <groupId> <message>
             var parts = text.Split(' ', 3);
             if (parts.Length == 3 && int.TryParse(parts[1], out var groupId))
             {
-                var group = await _db.ChatGroups.FindAsync(groupId);
+                var group = await _db.ChatGroups.FindAsync(new object[] { groupId }, cancellationToken);
                 if (group != null)
                 {
                     var msg = new AppMessage
                     {
                         ChatGroupId = groupId,
                         FromUserId = userId,
-                        Text = parts[2],
+                        Text = parts[2].Trim(),
                         SentAt = DateTime.UtcNow
                     };
                     _db.Messages.Add(msg);
-                    await _db.SaveChangesAsync();
-                    await _botClient.SendMessage(userId, $"✅ Сообщение опубликовано в группу «{group.Name}»");
+                    await _db.SaveChangesAsync(cancellationToken);
+
+                    // Dispatch self-destructing notifications (deleted after 7 hours)
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _notifications.NotifyStudentsAsync(
+                                msg.Id,
+                                group.Name,
+                                msg.Text,
+                                msg.Deadline,
+                                userId
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.LogError(ex, "Ошибка при рассылке уведомлений о ДЗ #{Id}", msg.Id);
+                        }
+                    });
+
+                    await _botClient.SendMessage(userId, $"✅ Сообщение опубликовано в группу «{group.Name}»", cancellationToken: cancellationToken);
                 }
                 else
                 {
-                    await _botClient.SendMessage(userId, "❌ Группа с таким ID не найдена.");
+                    await _botClient.SendMessage(userId, "❌ Группа с таким ID не найдена.", cancellationToken: cancellationToken);
                 }
             }
             else
             {
-                await _botClient.SendMessage(userId, "Формат команды: /post <ID_группы> <текст>");
+                await _botClient.SendMessage(userId, "Формат команды: /post <ID_группы> <текст>", cancellationToken: cancellationToken);
             }
         }
         else if (text == "/list")
         {
-            var groups = await _db.ChatGroups.ToListAsync();
+            var groups = await _db.ChatGroups.AsNoTracking().ToListAsync(cancellationToken);
             if (groups.Count == 0)
             {
-                await _botClient.SendMessage(userId, "Групп пока нет.");
+                await _botClient.SendMessage(userId, "Групп пока нет.", cancellationToken: cancellationToken);
             }
             else
             {
                 var reply = "📚 Доступные группы:\n" + string.Join('\n', groups.Select(g => $"• ID {g.Id}: {g.Name}"));
-                await _botClient.SendMessage(userId, reply);
+                await _botClient.SendMessage(userId, reply, cancellationToken: cancellationToken);
             }
         }
         else if (text == "/start")
@@ -135,7 +170,8 @@ public class BotController : ControllerBase
                 chatId: userId,
                 text: $"👋 Привет, {user.Username}!\n\nТвоя роль: *{user.Role}*\n• Отправь /list для просмотра предметов\n• Если ты администратор, публикуй ДЗ: `/post <ID_группы> <текст>`",
                 replyMarkup: keyboard,
-                parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown
+                parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown,
+                cancellationToken: cancellationToken
             );
         }
 

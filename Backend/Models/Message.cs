@@ -22,5 +22,10 @@ namespace TelegramBotApi.Models
         public string Text { get; set; } = string.Empty;
 
         public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Optional deadline for homework submission.
+        /// </summary>
+        public DateTime? Deadline { get; set; }
     }
 }

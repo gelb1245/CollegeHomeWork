@@ -6,45 +6,81 @@
   <title>College Homework — Mini App</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app-container">
-    <!-- Header -->
+
+    <!-- ===== HEADER ===== -->
     <header class="app-header">
       <div class="header-left">
-        <button id="backBtn" class="icon-btn hidden" title="Назад">←</button>
-        <div>
+        <button id="backBtn" class="icon-btn hidden" title="Назад">‹</button>
+        <div class="header-title-block">
+          <span id="headerUsername" class="header-username">Загрузка...</span>
           <h1 id="headerTitle">Предметы</h1>
-          <span id="userStatusSub" class="sub-status">Загрузка...</span>
         </div>
       </div>
-      <div class="header-right">
-        <!-- Static role badge: students cannot change it -->
-        <span id="userRoleBadge" class="role-badge">Загрузка...</span>
-      </div>
+      <span id="userRoleBadge" class="role-badge">...</span>
     </header>
 
-    <!-- Main Screens Container -->
+    <!-- ===== MAIN CONTENT ===== -->
     <main class="app-content">
-      
+
+      <!-- SCREEN: Access Denied -->
+      <section id="accessDeniedScreen" class="screen">
+        <div class="access-denied-box">
+          <div class="access-icon">🔒</div>
+          <h2>Доступ ограничен</h2>
+          <p id="accessDeniedReason" class="subtitle">Вас пока нет в списке студентов группы (вайтлисте).</p>
+          <div class="user-id-box">
+            <span class="id-label">Ваш Telegram ID:</span>
+            <code id="deniedTelegramId" class="id-value">Загрузка...</code>
+            <button id="copyMyIdBtn" class="btn primary-btn-sm" type="button">📋 Скопировать ID</button>
+          </div>
+          <p class="id-hint">Отправьте этот ID старосте или преподавателю, чтобы вас добавили в вайтлист группы.</p>
+          <button id="retryAccessBtn" class="btn secondary-btn" type="button">🔄 Проверить снова</button>
+        </div>
+      </section>
+
       <!-- SCREEN 1: Groups / Subjects List -->
       <section id="groupsScreen" class="screen active">
+
+        <!-- Search -->
         <div class="search-bar">
-          <input type="text" id="groupSearchInput" placeholder="🔍 Поиск предмета..." />
+          <input type="text" id="groupSearchInput" placeholder="Поиск предмета" />
         </div>
 
+        <!-- Filter pills: Все / Лекции / Домашка -->
+        <div class="groups-filter-tabs">
+          <button class="groups-filter-tab active" data-group-filter="all">Все</button>
+          <button class="groups-filter-tab" data-group-filter="lectures">Лекции</button>
+          <button class="groups-filter-tab" data-group-filter="homework">Домашка</button>
+        </div>
+
+        <!-- Deadlines summary banner -->
+        <div id="deadlinesSummaryCard" class="deadlines-summary-card hidden">
+          <div class="summary-icon">⏳</div>
+          <div class="summary-content">
+            <h4 id="deadlinesSummaryTitle">Горящие дедлайны</h4>
+            <p id="deadlinesSummaryText">Загрузка дедлайнов...</p>
+          </div>
+        </div>
+
+        <!-- Section label -->
         <div class="section-title-row">
           <h2>Чаты предметов и ДЗ</h2>
           <span id="groupsCounter" class="counter-badge">0</span>
         </div>
 
+        <!-- Groups list -->
         <div id="groupsList" class="groups-list">
           <div class="loader">Загрузка предметов...</div>
         </div>
       </section>
 
-      <!-- SCREEN 2: Chat Detail / Messages Inside a Subject -->
+      <!-- SCREEN 2: Chat / Messages -->
       <section id="chatScreen" class="screen">
         <div class="chat-header-banner">
           <div>
@@ -52,7 +88,22 @@
             <p id="currentChatDesc" class="chat-desc"></p>
           </div>
           <div id="chatAdminActions" class="chat-header-actions hidden">
-            <button id="deleteCurrentGroupBtn" class="danger-btn-sm" title="Удалить этот предмет">🗑️ Удалить предмет</button>
+            <button id="deleteCurrentGroupBtn" class="danger-btn-sm" title="Удалить этот предмет">🗑️ Удалить</button>
+          </div>
+        </div>
+
+        <!-- Task Progress & Filter -->
+        <div class="chat-progress-card">
+          <div class="progress-info">
+            <span id="chatProgressText">Сдано 0 из 0 заданий (0%)</span>
+            <div class="progress-bar-track">
+              <div id="chatProgressBar" class="progress-bar-fill" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="chat-filter-tabs">
+            <button class="chat-filter-tab active" data-task-filter="all">Все (<span id="countAllTasks">0</span>)</button>
+            <button class="chat-filter-tab" data-task-filter="pending">Не сдано (<span id="countPendingTasks">0</span>)</button>
+            <button class="chat-filter-tab" data-task-filter="completed">Сдано (<span id="countCompletedTasks">0</span>)</button>
           </div>
         </div>
 
@@ -60,25 +111,39 @@
           <div class="empty-state">Нет записей по этому предмету.</div>
         </div>
 
-        <!-- Input Bar for Admin / Developer to post homework -->
-        <div id="adminPostArea" class="chat-input-bar hidden">
-          <textarea id="adminMessageInput" placeholder="Напишите задание, параграф, дедлайн..." rows="1"></textarea>
-          <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ">➤</button>
+        <!-- Admin post bar -->
+        <div id="adminPostArea" class="chat-input-bar-wrapper hidden">
+          <div class="deadline-toggle-bar">
+            <button type="button" id="toggleDeadlineBtn" class="pill-btn">📅 Дедлайн: <span id="deadlinePreview">Без срока</span></button>
+            <div id="deadlineContainer" class="deadline-picker-container hidden">
+              <input type="datetime-local" id="adminDeadlineInput" class="deadline-input" />
+              <div class="deadline-presets">
+                <button type="button" class="preset-btn" data-preset="tomorrow">Завтра</button>
+                <button type="button" class="preset-btn" data-preset="3days">+3 дня</button>
+                <button type="button" class="preset-btn" data-preset="1week">+1 нед</button>
+                <button type="button" class="preset-btn danger" data-preset="clear">Сброс</button>
+              </div>
+            </div>
+          </div>
+          <div class="chat-input-bar">
+            <textarea id="adminMessageInput" placeholder="Напишите задание, параграф, упражнение..." rows="1"></textarea>
+            <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ">➤</button>
+          </div>
         </div>
       </section>
 
-      <!-- SCREEN 3: Users & Whitelist Management (Developer / Admin) -->
+      <!-- SCREEN 3: Users & Whitelist -->
       <section id="usersScreen" class="screen">
-        <div class="section-title-row">
+        <div class="section-title-row" style="margin-bottom:12px">
           <div>
-            <h2>Вайтлист и Участники</h2>
+            <h2 style="font-size:1.1rem;text-transform:none;letter-spacing:0;color:var(--text-primary);font-weight:700;">Вайтлист и Участники</h2>
             <p class="subtitle">Управление студентами, админами и разработчиками</p>
           </div>
           <button id="addUserModalBtn" class="btn primary-btn-sm">+ Добавить</button>
         </div>
 
         <div class="search-bar">
-          <input type="text" id="userSearchInput" placeholder="🔍 Поиск по имени или ID..." />
+          <input type="text" id="userSearchInput" placeholder="Поиск по имени или ID" />
         </div>
 
         <div class="filter-tabs">
@@ -93,43 +158,94 @@
         </div>
       </section>
 
-      <!-- SCREEN 4: Manage Subjects (Developer) -->
+      <!-- SCREEN 4: Settings -->
       <section id="settingsScreen" class="screen">
-        <div class="section-title-row">
-          <h2>Управление предметами</h2>
-        </div>
+        <div class="settings-list">
 
-        <div class="card add-card">
-          <h3>➕ Создать новый предмет</h3>
-          <p class="card-desc">Добавьте новый чат предмета (например: Физика, Высшая математика, Программирование)</p>
-          <div class="form-group">
-            <input type="text" id="newGroupName" placeholder="Название предмета" />
-            <input type="text" id="newGroupDesc" placeholder="Описание или контакты преподавателя" />
-            <button id="createGroupBtn" class="btn primary-btn">+ Создать предмет</button>
+          <!-- Theme section -->
+          <div>
+            <div class="settings-section-label">Оформление</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <span class="settings-row-icon">🎨</span>
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Тема</div>
+                  <div class="settings-row-sub">Выберите светлую или тёмную тему</div>
+                </div>
+                <div class="theme-toggle-group">
+                  <button class="theme-btn active" id="darkThemeBtn">🌙 Тёмная</button>
+                  <button class="theme-btn" id="lightThemeBtn">☀️ Светлая</button>
+                </div>
+              </div>
+            </div>
           </div>
+
+          <!-- Subjects management (Developer only) -->
+          <div id="createGroupSection" class="hidden">
+            <div class="settings-section-label">Управление предметами</div>
+            <div class="settings-group">
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:10px;">
+                <div class="settings-row-title" style="font-size:1rem;font-weight:600;">➕ Создать новый предмет</div>
+                <p class="card-desc" style="margin:0;">Добавьте новый чат предмета (например: Физика, Математика, Программирование)</p>
+                <div class="form-group" style="width:100%;margin:0;">
+                  <input type="text" id="newGroupName" placeholder="Название предмета" />
+                  <input type="text" id="newGroupDesc" placeholder="Описание или контакты преподавателя" />
+                  <button id="createGroupBtn" class="btn primary-btn">+ Создать предмет</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- About section -->
+          <div>
+            <div class="settings-section-label">О приложении</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <span class="settings-row-icon">📚</span>
+                <div class="settings-row-text">
+                  <div class="settings-row-title">College Homework Bot</div>
+                  <div class="settings-row-sub">Версия 2.0 — ДЗ, дедлайны, уведомления</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
 
     </main>
 
-    <!-- Bottom Navigation Bar -->
+    <!-- ===== BOTTOM NAVIGATION ===== -->
     <nav class="bottom-nav">
       <button class="nav-item active" data-screen="groupsScreen">
-        <span class="nav-icon">📚</span>
+        <svg class="nav-svg" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
         <span class="nav-label">Предметы</span>
       </button>
       <button class="nav-item" id="navUsersTab" data-screen="usersScreen">
-        <span class="nav-icon">👥</span>
+        <svg class="nav-svg" viewBox="0 0 24 24">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
         <span class="nav-label">Вайтлист</span>
       </button>
       <button class="nav-item" id="navSettingsTab" data-screen="settingsScreen">
-        <span class="nav-icon">⚙️</span>
+        <svg class="nav-svg" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
         <span class="nav-label">Настройки</span>
       </button>
     </nav>
   </div>
 
-  <!-- Modal: Add User Manually -->
+  <!-- Modal: Add User -->
   <div id="addUserModal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header">
