@@ -169,7 +169,7 @@ app.Use(async (context, next) =>
     // Allow embedding in Telegram WebApp while preventing clickjacking from other domains
     context.Response.Headers.Append("Content-Security-Policy",
         "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' https://telegram.org; " +
+        "script-src 'self' 'unsafe-inline' https://telegram.org https://cdn.jsdelivr.net; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com data:; " +
         "img-src 'self' data: https:; " +

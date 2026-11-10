@@ -3,11 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>College Homework — Mini App</title>
+  <title>College Homework</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <!-- Markdown renderer -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -16,7 +20,7 @@
     <!-- ===== HEADER ===== -->
     <header class="app-header">
       <div class="header-left">
-        <button id="backBtn" class="icon-btn hidden" title="Назад">‹</button>
+        <button id="backBtn" class="icon-btn hidden" title="Назад"><svg class="ico" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="header-title-block">
           <span id="headerUsername" class="header-username">Загрузка...</span>
           <h1 id="headerTitle">Предметы</h1>
@@ -31,16 +35,16 @@
       <!-- SCREEN: Access Denied -->
       <section id="accessDeniedScreen" class="screen">
         <div class="access-denied-box">
-          <div class="access-icon">🔒</div>
+          <div class="access-icon"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
           <h2>Доступ ограничен</h2>
           <p id="accessDeniedReason" class="subtitle">Вас пока нет в списке студентов группы (вайтлисте).</p>
           <div class="user-id-box">
             <span class="id-label">Ваш Telegram ID:</span>
             <code id="deniedTelegramId" class="id-value">Загрузка...</code>
-            <button id="copyMyIdBtn" class="btn primary-btn-sm" type="button">📋 Скопировать ID</button>
+            <button id="copyMyIdBtn" class="primary-btn-sm" type="button">Скопировать ID</button>
           </div>
           <p class="id-hint">Отправьте этот ID старосте или преподавателю, чтобы вас добавили в вайтлист группы.</p>
-          <button id="retryAccessBtn" class="btn secondary-btn" type="button">🔄 Проверить снова</button>
+          <button id="retryAccessBtn" class="btn secondary-btn" type="button">Проверить снова</button>
         </div>
       </section>
 
@@ -61,7 +65,7 @@
 
         <!-- Deadlines summary banner -->
         <div id="deadlinesSummaryCard" class="deadlines-summary-card hidden">
-          <div class="summary-icon">⏳</div>
+          <div class="summary-icon"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
           <div class="summary-content">
             <h4 id="deadlinesSummaryTitle">Горящие дедлайны</h4>
             <p id="deadlinesSummaryText">Загрузка дедлайнов...</p>
@@ -88,7 +92,7 @@
             <p id="currentChatDesc" class="chat-desc"></p>
           </div>
           <div id="chatAdminActions" class="chat-header-actions hidden">
-            <button id="deleteCurrentGroupBtn" class="danger-btn-sm" title="Удалить этот предмет">🗑️ Удалить</button>
+            <button id="deleteCurrentGroupBtn" class="danger-btn-sm" title="Удалить этот предмет"><svg class="ico" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>Удалить</button>
           </div>
         </div>
 
@@ -114,7 +118,7 @@
         <!-- Admin post bar -->
         <div id="adminPostArea" class="chat-input-bar-wrapper hidden">
           <div class="deadline-toggle-bar">
-            <button type="button" id="toggleDeadlineBtn" class="pill-btn">📅 Дедлайн: <span id="deadlinePreview">Без срока</span></button>
+            <button type="button" id="toggleDeadlineBtn" class="pill-btn">Дедлайн: <span id="deadlinePreview">Без срока</span></button>
             <div id="deadlineContainer" class="deadline-picker-container hidden">
               <input type="datetime-local" id="adminDeadlineInput" class="deadline-input" />
               <div class="deadline-presets">
@@ -126,17 +130,17 @@
             </div>
           </div>
           <div class="chat-input-bar">
-            <textarea id="adminMessageInput" placeholder="Напишите задание, параграф, упражнение..." rows="1"></textarea>
-            <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ">➤</button>
+            <textarea id="adminMessageInput" placeholder="Новое задание…" rows="1"></textarea>
+            <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ"><svg class="ico" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button>
           </div>
         </div>
       </section>
 
       <!-- SCREEN 3: Users & Whitelist -->
       <section id="usersScreen" class="screen">
-        <div class="section-title-row" style="margin-bottom:12px">
+        <div class="section-title-row users-header-row">
           <div>
-            <h2 style="font-size:1.1rem;text-transform:none;letter-spacing:0;color:var(--text-primary);font-weight:700;">Вайтлист и Участники</h2>
+            <h2>Вайтлист и участники</h2>
             <p class="subtitle">Управление студентами, админами и разработчиками</p>
           </div>
           <button id="addUserModalBtn" class="btn primary-btn-sm">+ Добавить</button>
@@ -167,14 +171,14 @@
             <div class="settings-section-label">Оформление</div>
             <div class="settings-group">
               <div class="settings-row">
-                <span class="settings-row-icon">🎨</span>
+                <span class="settings-row-icon"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></span>
                 <div class="settings-row-text">
                   <div class="settings-row-title">Тема</div>
-                  <div class="settings-row-sub">Выберите светлую или тёмную тему</div>
+                  <div class="settings-row-sub">Тёмная или светлая</div>
                 </div>
                 <div class="theme-toggle-group">
-                  <button class="theme-btn active" id="darkThemeBtn">🌙 Тёмная</button>
-                  <button class="theme-btn" id="lightThemeBtn">☀️ Светлая</button>
+                  <button class="theme-btn active" id="darkThemeBtn">Тёмная</button>
+                  <button class="theme-btn" id="lightThemeBtn">Светлая</button>
                 </div>
               </div>
             </div>
@@ -184,13 +188,13 @@
           <div id="createGroupSection" class="hidden">
             <div class="settings-section-label">Управление предметами</div>
             <div class="settings-group">
-              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:10px;">
-                <div class="settings-row-title" style="font-size:1rem;font-weight:600;">➕ Создать новый предмет</div>
-                <p class="card-desc" style="margin:0;">Добавьте новый чат предмета (например: Физика, Математика, Программирование)</p>
-                <div class="form-group" style="width:100%;margin:0;">
+              <div class="settings-row stacked">
+                <div class="settings-row-title">Новый предмет</div>
+                <p class="card-desc">Добавьте новый чат предмета (например: Физика, Математика, Программирование)</p>
+                <div class="form-group" style="margin:0;">
                   <input type="text" id="newGroupName" placeholder="Название предмета" />
                   <input type="text" id="newGroupDesc" placeholder="Описание или контакты преподавателя" />
-                  <button id="createGroupBtn" class="btn primary-btn">+ Создать предмет</button>
+                  <button id="createGroupBtn" class="btn primary-btn">Создать предмет</button>
                 </div>
               </div>
             </div>
@@ -201,7 +205,7 @@
             <div class="settings-section-label">О приложении</div>
             <div class="settings-group">
               <div class="settings-row">
-                <span class="settings-row-icon">📚</span>
+                <span class="settings-row-icon"><svg class="ico" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg></span>
                 <div class="settings-row-text">
                   <div class="settings-row-title">College Homework Bot</div>
                   <div class="settings-row-sub">Версия 2.0 — ДЗ, дедлайны, уведомления</div>
@@ -219,18 +223,16 @@
     <nav class="bottom-nav">
       <button class="nav-item active" data-screen="groupsScreen">
         <svg class="nav-svg" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
-          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
-          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
-          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="3" width="18" height="18" rx="3"/>
+          <path d="M12 3v18"/>
         </svg>
         <span class="nav-label">Предметы</span>
       </button>
       <button class="nav-item" id="navUsersTab" data-screen="usersScreen">
         <svg class="nav-svg" viewBox="0 0 24 24">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
           <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
           <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
         <span class="nav-label">Вайтлист</span>
@@ -264,9 +266,9 @@
         <div class="form-group">
           <label>Роль в системе:</label>
           <select id="manualUserRole">
-            <option value="User">🎓 Студент (только чтение)</option>
-            <option value="Admin">👑 Администратор (публикация ДЗ)</option>
-            <option value="Developer">👨‍💻 Разработчик (полный доступ)</option>
+            <option value="User">Студент — только чтение</option>
+            <option value="Admin">Администратор — публикация ДЗ</option>
+            <option value="Developer">Разработчик — полный доступ</option>
           </select>
         </div>
       </div>

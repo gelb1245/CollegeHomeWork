@@ -24,32 +24,61 @@ let currentRoleFilter = "all";
 let currentTaskFilter = "all"; // "all" | "pending" | "completed"
 let currentGroupFilter = "all"; // "all" | "lectures" | "homework"
 
+// Line icons (stroke SVG, Lucide-style)
+const ICONS = {
+  landmark: '<path d="M3 21h18"/><path d="M5 21V10"/><path d="M19 21V10"/><path d="M9 21v-6a3 3 0 0 1 6 0v6"/><path d="M3 10 12 4l9 6"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 0 0 18 14 14 0 0 0 0-18"/><path d="M3 12h18"/>',
+  check: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  sigma: '<path d="M18 7V4H6l6 8-6 8h12v-3"/>',
+  atom: '<circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2-2 0-7.4-4.5-11.9S5.8 1.8 3.8 3.8s0 7.4 4.5 11.9 9.9 6.5 11.9 4.5Z"/><path d="M15.7 15.7c4.5-4.5 6.5-9.9 4.5-11.9s-7.4 0-11.9 4.5-6.5 9.9-4.5 11.9 7.4 0 11.9-4.5Z"/>',
+  flask: '<path d="M9 3h6"/><path d="M10 3v6.5L4.6 18.8A1.5 1.5 0 0 0 5.9 21h12.2a1.5 1.5 0 0 0 1.3-2.2L14 9.5V3"/><path d="M7 15h10"/>',
+  leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10Z"/><path d="M2 21c0-3 1.9-5.4 5.1-6C9.5 14.5 12 13 13 12"/>',
+  code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+  book: '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
+  chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  palette: '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.7 1.7-1.7h2A5.5 5.5 0 0 0 22 11c0-5-4.5-9-10-9z"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  pulse: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M8 17v-6"/><path d="M13 17V7"/><path d="M18 17v-4"/>',
+  bulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  codeXml: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
+  crown: '<path d="M2 7l4 10h12l4-10-6 4-4-7-4 7z"/><path d="M6 21h12"/>',
+  cap: '<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  checkMark: '<path d="M20 6 9 17l-5-5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
+};
+
+function icon(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.folder}</svg>`;
+}
+
 // Subject icon mapping based on name keywords
 const SUBJECT_ICONS = [
-  { keywords: ["история", "истор"], icon: "🏛️" },
-  { keywords: ["математик", "матем", "алгебр"], icon: "📐" },
-  { keywords: ["физик"], icon: "⚛️" },
-  { keywords: ["химия", "хими"], icon: "🧪" },
-  { keywords: ["биологи", "биол"], icon: "🧬" },
-  { keywords: ["география", "геогр", "всесвит"], icon: "🌐" },
-  { keywords: ["программирован", "програм", "информатик", "питон", "python", "js", "java"], icon: "💻" },
-  { keywords: ["литератур"], icon: "📖" },
-  { keywords: ["английск", "english", "язык", "deutsch"], icon: "🗣️" },
-  { keywords: ["рисован", "изобраз", "искусств"], icon: "🎨" },
-  { keywords: ["музык"], icon: "🎵" },
-  { keywords: ["физкультур", "физвоспит", "спорт"], icon: "⚽" },
-  { keywords: ["общее", "общ", "дз", "дедлайн"], icon: "✅" },
-  { keywords: ["экономик", "эконом"], icon: "📊" },
-  { keywords: ["философи"], icon: "🤔" },
+  { keywords: ["история", "истор"], icon: "landmark" },
+  { keywords: ["география", "геогр", "всесвит"], icon: "globe" },
+  { keywords: ["математик", "матем", "алгебр", "геометр"], icon: "sigma" },
+  { keywords: ["физик"], icon: "atom" },
+  { keywords: ["химия", "хими"], icon: "flask" },
+  { keywords: ["биологи", "биол", "эколог"], icon: "leaf" },
+  { keywords: ["программирован", "програм", "информатик", "питон", "python", "js", "java"], icon: "code" },
+  { keywords: ["литератур"], icon: "book" },
+  { keywords: ["английск", "english", "язык", "deutsch"], icon: "chat" },
+  { keywords: ["рисован", "изобраз", "искусств"], icon: "palette" },
+  { keywords: ["музык"], icon: "music" },
+  { keywords: ["физкультур", "физвоспит", "спорт"], icon: "pulse" },
+  { keywords: ["экономик", "эконом"], icon: "chart" },
+  { keywords: ["философи"], icon: "bulb" },
+  { keywords: ["общее", "общ", "дз", "дедлайн"], icon: "check" },
 ];
 
 function getSubjectIcon(name) {
-  if (!name) return "📁";
-  const lower = name.toLowerCase();
-  for (const entry of SUBJECT_ICONS) {
-    if (entry.keywords.some(k => lower.includes(k))) return entry.icon;
-  }
-  return "📁";
+  const lower = (name || "").toLowerCase();
+  const entry = SUBJECT_ICONS.find((e) => e.keywords.some((k) => lower.includes(k)));
+  return icon(entry ? entry.icon : "folder");
 }
 
 // Centralized API fetcher with Telegram HMAC-SHA256 initData
@@ -68,13 +97,23 @@ async function apiFetch(path, options = {}) {
 // THEME
 // ============================================================
 function initTheme() {
-  const saved = localStorage.getItem("app-theme") || "dark";
-  applyTheme(saved);
+  let saved = null;
+  try { saved = localStorage.getItem("app-theme"); } catch {}
+  // First launch: follow the Telegram client theme
+  const tgScheme = window.Telegram?.WebApp?.colorScheme;
+  applyTheme(saved || (tgScheme === "light" ? "light" : "dark"));
 }
 
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("app-theme", theme);
+  try { localStorage.setItem("app-theme", theme); } catch {}
+
+  const tg = window.Telegram?.WebApp;
+  const bg = theme === "light" ? "#ebebef" : "#000000";
+  try {
+    if (tg?.setHeaderColor) tg.setHeaderColor(bg);
+    if (tg?.setBackgroundColor) tg.setBackgroundColor(bg);
+  } catch {}
 
   const darkBtn = document.getElementById("darkThemeBtn");
   const lightBtn = document.getElementById("lightThemeBtn");
@@ -172,7 +211,6 @@ async function initApp() {
   if (tg) {
     tg.ready();
     tg.expand();
-    if (tg.setHeaderColor) tg.setHeaderColor("secondary_bg_color");
   }
 
   const fallbackId = tg?.initDataUnsafe?.user?.id || PRIMARY_OWNER_ID;
@@ -208,7 +246,7 @@ function showAccessDenied(telegramId, customMessage) {
   if (customMessage && accessDeniedReason) accessDeniedReason.textContent = customMessage;
   navItems.forEach((btn) => btn.classList.add("hidden"));
   if (userRoleBadge) {
-    userRoleBadge.textContent = "⛔ Ограничен";
+    userRoleBadge.innerHTML = `${icon("lock")}Ограничен`;
     userRoleBadge.className = "role-badge user";
   }
   if (headerUsername) headerUsername.textContent = "Доступ не подтвержден";
@@ -219,8 +257,8 @@ if (copyMyIdBtn) {
     const id = deniedTelegramId?.textContent;
     if (id) {
       navigator.clipboard.writeText(id).then(() => {
-        copyMyIdBtn.textContent = "✅ Скопировано!";
-        setTimeout(() => { copyMyIdBtn.textContent = "📋 Скопировать ID"; }, 2000);
+        copyMyIdBtn.textContent = "Скопировано";
+        setTimeout(() => { copyMyIdBtn.textContent = "Скопировать ID"; }, 2000);
       });
     }
   });
@@ -248,18 +286,18 @@ async function handleResponseError(res, defaultMsg) {
 // SYNC ROLE UI
 // ============================================================
 function syncRoleUI() {
-  let roleText = "🎓 Студент";
+  let roleText = `${icon("cap")}Студент`;
   let roleClass = "user";
   if (currentUser.role === "Developer") {
-    roleText = "⟨/⟩ Разработчик";
+    roleText = `${icon("codeXml")}Разработчик`;
     roleClass = "dev";
   } else if (currentUser.role === "Admin") {
-    roleText = "👑 Администратор";
+    roleText = `${icon("crown")}Админ`;
     roleClass = "admin";
   }
 
   if (userRoleBadge) {
-    userRoleBadge.textContent = roleText;
+    userRoleBadge.innerHTML = roleText;
     userRoleBadge.className = `role-badge ${roleClass}`;
   }
 
@@ -394,14 +432,14 @@ async function loadDeadlinesSummary() {
 
     deadlinesSummaryCard.classList.remove("hidden");
     if (urgent.length > 0) {
-      deadlinesSummaryTitle.textContent = `⚠️ Горящие дедлайны (${urgent.length})`;
+      deadlinesSummaryTitle.textContent = `Горящие дедлайны · ${urgent.length}`;
       const subjects = [...new Set(urgent.map((u) => u.groupName))].join(", ");
       deadlinesSummaryText.textContent = `Срочно сдать задания по: ${subjects}`;
-      deadlinesSummaryCard.style.borderColor = "rgba(255,159,10,0.5)";
+      deadlinesSummaryCard.classList.add("urgent");
     } else {
-      deadlinesSummaryTitle.textContent = `⏳ Ближайшие задания (${uncompleted.length})`;
+      deadlinesSummaryTitle.textContent = `Ближайшие задания · ${uncompleted.length}`;
       deadlinesSummaryText.textContent = `Выполнено ${items.length - uncompleted.length} из ${items.length} дедлайнов`;
-      deadlinesSummaryCard.style.borderColor = "";
+      deadlinesSummaryCard.classList.remove("urgent");
     }
   } catch (err) {
     console.warn("Could not load deadlines summary:", err);
@@ -439,21 +477,21 @@ function renderGroupsList(groups) {
     const item = document.createElement("div");
     item.className = "group-item";
 
-    const icon = getSubjectIcon(g.name);
+    const subjectIcon = getSubjectIcon(g.name);
     // Message count badge (only if > 0)
     const countBadgeHtml = g.messageCount > 0
       ? `<span class="group-count-badge">${g.messageCount}</span>`
       : "";
 
     item.innerHTML = `
-      <div class="group-avatar">${icon}</div>
+      <div class="group-avatar">${subjectIcon}</div>
       <div class="group-info">
         <h3>${escapeHtml(g.name)}</h3>
         <p>${escapeHtml(g.description || "Задания и дедлайны")}</p>
       </div>
       <div class="group-right">
         ${countBadgeHtml}
-        <span class="arrow-icon">›</span>
+        <span class="arrow-icon">${icon("chevronRight")}</span>
       </div>
     `;
     item.addEventListener("click", () => openChat(g.id, g.name, g.description));
@@ -593,7 +631,7 @@ function renderFilteredMessages() {
 
   if (filtered.length === 0) {
     let msg = "Пока нет записей. Администратор ещё не опубликовал ДЗ.";
-    if (currentTaskFilter === "pending") msg = "🎉 Отлично! Все задания по этому предмету выполнены.";
+    if (currentTaskFilter === "pending") msg = "Все задания по этому предмету выполнены.";
     if (currentTaskFilter === "completed") msg = "Пока нет выполненных заданий.";
     messagesContainer.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
@@ -619,15 +657,16 @@ function renderFilteredMessages() {
 
     // Render text with Markdown if available, else escape
     let textHtml;
-    if (typeof marked !== "undefined") {
-      textHtml = marked.parse(m.text || "");
+    // Markdown is rendered only together with DOMPurify, otherwise HTML in the text would execute (XSS)
+    if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
+      textHtml = DOMPurify.sanitize(marked.parse(m.text || ""));
     } else {
-      textHtml = escapeHtml(m.text);
+      textHtml = escapeHtml(m.text).replace(/\n/g, "<br>");
     }
 
     card.innerHTML = `
       <div class="message-card-header">
-        <span class="message-author">✍️ ${escapeHtml(m.author)}</span>
+        <span class="message-author">${escapeHtml(m.author)}</span>
         <div>
           <span class="message-date">${dateFormatted}, ${timeFormatted}</span>
           ${canDelete ? `<button class="delete-msg-btn" data-msg-id="${m.id}" title="Удалить запись">✕</button>` : ""}
@@ -637,7 +676,7 @@ function renderFilteredMessages() {
       <div class="message-footer-row">
         ${deadlineBadgeHtml ? `<div>${deadlineBadgeHtml}</div>` : "<div></div>"}
         <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}" data-toggle-id="${m.id}">
-          ${m.isCompleted ? "✅ Сдано" : "⬜ Отметить сданным"}
+          ${m.isCompleted ? `${icon("checkMark")}Сдано` : "Отметить сданным"}
         </button>
       </div>
     `;
@@ -691,13 +730,13 @@ function formatDeadlineBadge(deadlineStr, isCompleted) {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
   });
 
-  if (isCompleted) return `<span class="deadline-badge done">✅ Сдано (срок: ${formattedDate})</span>`;
-  if (diffHours < 0) return `<span class="deadline-badge overdue">🔥 Просрочено (${formattedDate})</span>`;
+  if (isCompleted) return `<span class="deadline-badge done">${icon("checkMark")}Сдано · срок ${formattedDate}</span>`;
+  if (diffHours < 0) return `<span class="deadline-badge overdue">${icon("clock")}Просрочено · ${formattedDate}</span>`;
   if (diffHours < 24) {
     const hoursLeft = Math.max(1, Math.round(diffHours));
-    return `<span class="deadline-badge urgent">⚠️ Срок: ${formattedDate} (осталось ${hoursLeft} ч)</span>`;
+    return `<span class="deadline-badge urgent">${icon("clock")}${formattedDate} · осталось ${hoursLeft} ч</span>`;
   }
-  return `<span class="deadline-badge normal">⏳ Срок: ${formattedDate} (осталось ${diffDays} дн)</span>`;
+  return `<span class="deadline-badge normal">${icon("clock")}${formattedDate} · осталось ${diffDays} дн</span>`;
 }
 
 // Send Message
@@ -827,7 +866,7 @@ function renderUsersList(users) {
             <option value="Admin" ${roleName === "Admin" ? "selected" : ""}>Админ</option>
             <option value="Developer" ${roleName === "Developer" ? "selected" : ""}>Разработчик</option>
           </select>
-          <button class="delete-user-btn" data-del-user="${u.telegramId}" title="Удалить из системы">🗑️</button>
+          <button class="delete-user-btn" data-del-user="${u.telegramId}" title="Удалить из системы">${icon("trash")}</button>
         ` : ""}
       </div>
     `;

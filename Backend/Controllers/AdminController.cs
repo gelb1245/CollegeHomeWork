@@ -20,6 +20,8 @@ public record MessageResponseDto(
     bool IsCompleted,
     DateTime? CompletedAt);
 
+public record GroupResponseDto(int Id, string Name, string? Description, int MessageCount);
+
 public record CreateGroupDto(
     [Required(ErrorMessage = "Имя группы обязательно")]
     [StringLength(100, MinimumLength = 1, ErrorMessage = "Длина имени должна быть от 1 до 100 символов")]
@@ -112,7 +114,7 @@ public class AdminController : ControllerBase
 
     // ---------- Groups / Subjects ----------
     [HttpGet("groups")]
-    public async Task<ActionResult<IEnumerable<ChatGroup>>> GetAllGroups(CancellationToken cancellationToken)
+    public async Task<ActionResult<IEnumerable<GroupResponseDto>>> GetAllGroups(CancellationToken cancellationToken)
     {
         var groups = await _db.ChatGroups.AsNoTracking().ToListAsync(cancellationToken);
         if (groups.Count == 0)
@@ -127,7 +129,17 @@ public class AdminController : ControllerBase
             await _db.SaveChangesAsync(cancellationToken);
             groups = defaultGroups;
         }
-        return Ok(groups);
+
+        // Badge count: tasks in the subject that the current user has not marked as completed yet
+        var userId = CurrentUser.TelegramId;
+        var pendingByGroup = await _db.Messages.AsNoTracking()
+            .Where(m => !_db.UserTaskProgresses.Any(p => p.MessageId == m.Id && p.UserId == userId && p.IsCompleted))
+            .GroupBy(m => m.ChatGroupId)
+            .Select(g => new { GroupId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.GroupId, x => x.Count, cancellationToken);
+
+        return Ok(groups.Select(g => new GroupResponseDto(
+            g.Id, g.Name, g.Description, pendingByGroup.GetValueOrDefault(g.Id))));
     }
 
     [HttpPost("group")]
