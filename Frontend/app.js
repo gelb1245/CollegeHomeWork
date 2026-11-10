@@ -772,13 +772,13 @@ function formatDeadlineBadge(deadlineStr, isCompleted) {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
   });
 
-  if (isCompleted) return `<span class="deadline-badge done">${icon("checkMark")}Сдано · срок ${formattedDate}</span>`;
-  if (diffHours < 0) return `<span class="deadline-badge overdue">${icon("clock")}Просрочено · ${formattedDate}</span>`;
+  if (isCompleted) return `<span class="deadline-badge done">${icon("checkMark")}${formattedDate}</span>`;
+  if (diffHours < 0) return `<span class="deadline-badge overdue">${icon("clock")}просрочено</span>`;
   if (diffHours < 24) {
     const hoursLeft = Math.max(1, Math.round(diffHours));
-    return `<span class="deadline-badge urgent">${icon("clock")}${formattedDate} · осталось ${hoursLeft} ч</span>`;
+    return `<span class="deadline-badge urgent">${icon("clock")}${formattedDate} · ${hoursLeft} ч</span>`;
   }
-  return `<span class="deadline-badge normal">${icon("clock")}${formattedDate} · осталось ${diffDays} дн</span>`;
+  return `<span class="deadline-badge normal">${icon("clock")}${formattedDate} · ${diffDays} дн</span>`;
 }
 
 // Send Message
