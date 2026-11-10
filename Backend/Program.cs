@@ -9,6 +9,9 @@ using Telegram.Bot;
 using TelegramBotApi.Data;
 using TelegramBotApi.Services;
 
+// Development only: pick up DATABASE_URL etc. from .env.local (written by `neon init`)
+TelegramBotApi.LocalEnvFile.LoadForDevelopment();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configure Kestrel Limits (Anti-DDoS, Slowloris protection, Resource limits)
@@ -40,11 +43,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 // 3. Database with connection pooling and busy timeout
-// Override with env var ConnectionStrings__Default, e.g. "Data Source=/var/data/telegrambot.db"
-// when the database lives on a persistent disk (Render, Docker volume).
-var connectionString = builder.Configuration.GetConnectionString("Default")
-                       ?? "Data Source=telegrambot.db;Cache=Shared;Mode=ReadWriteCreate;Default Timeout=15";
-builder.Services.AddDbContext<TelegramBotContext>(opt => opt.UseSqlite(connectionString));
+// PostgreSQL when DATABASE_URL (or ConnectionStrings__Default) is a postgresql:// URL, otherwise local SQLite.
+// See Data/DatabaseConfig.cs.
+builder.Services.AddBotDatabase(builder.Configuration);
 
 // 4. Rate Limiting Protection (ASP.NET Core 8)
 builder.Services.AddRateLimiter(options =>

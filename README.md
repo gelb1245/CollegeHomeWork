@@ -58,15 +58,21 @@ collegehomework/
 | Переменная | Значение |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | токен бота |
-| `ConnectionStrings__Default` | (опционально) путь к БД на постоянном диске, напр. `Data Source=/var/data/telegrambot.db` |
+| `DATABASE_URL` | строка подключения PostgreSQL, напр. `postgresql://user:pass@host/db?sslmode=require` (Neon/Supabase). Если не задана — используется локальный SQLite |
 
 Без токена приложение не запустится и выведет понятную ошибку.
 
 ### База данных
-Схема управляется **только миграциями EF Core** (`Backend/Migrations`) и применяется автоматически при старте. Новая миграция после изменения моделей:
+Провайдер выбирается автоматически:
+- **PostgreSQL** — если задана переменная `DATABASE_URL` (формат `postgresql://...`). Используется в продакшене.
+- **SQLite** (`Backend/telegrambot.db`) — если переменной нет. Удобно для локальной разработки.
+
+Схема управляется **только миграциями EF Core** и применяется автоматически при старте. Миграции раздельные: `Backend/Migrations` (SQLite) и `Backend/Migrations/Postgres`. После изменения моделей создайте миграцию для обоих:
 ```bash
 dotnet tool restore
-cd Backend && dotnet ef migrations add ИмяМиграции
+cd Backend
+dotnet ef migrations add ИмяМиграции --context TelegramBotContext
+dotnet ef migrations add ИмяМиграции --context PostgresTelegramBotContext --output-dir Migrations/Postgres
 ```
 Файл `telegrambot.db` содержит личные данные студентов и не хранится в git.
 

@@ -27,3 +27,6 @@ appsettings.*.local.json
 ## SQLite database (contains users' personal data)
 *.db
 *.db-journal
+.neon
+node_modules/
+.env.local

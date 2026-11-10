@@ -10,6 +10,12 @@ namespace TelegramBotApi.Data
         {
         }
 
+        // Used by provider-specific subclasses (see PostgresTelegramBotContext)
+        protected TelegramBotContext(DbContextOptions options)
+            : base(options)
+        {
+        }
+
         public DbSet<User> Users => Set<User>();
         public DbSet<ChatGroup> ChatGroups => Set<ChatGroup>();
         public DbSet<Message> Messages => Set<Message>();

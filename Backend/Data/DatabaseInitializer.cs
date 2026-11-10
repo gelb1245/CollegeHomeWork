@@ -15,6 +15,15 @@ public static class DatabaseInitializer
 
     public static async Task InitializeAsync(TelegramBotContext db, ILogger logger, CancellationToken ct = default)
     {
+        if (!db.Database.IsSqlite())
+        {
+            // PostgreSQL: schema is fully managed by Migrations/Postgres, no legacy databases to adopt
+            logger.LogInformation("База данных: {Provider}. Применение миграций...", db.Database.ProviderName);
+            await db.Database.MigrateAsync(ct);
+            return;
+        }
+
+        logger.LogInformation("База данных: SQLite. Применение миграций...");
         var usersTableExists = await TableExistsAsync(db, "Users", ct);
         var historyTableExists = await TableExistsAsync(db, "__EFMigrationsHistory", ct);
 
