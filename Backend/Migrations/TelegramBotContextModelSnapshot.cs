@@ -44,6 +44,9 @@ namespace collegehomework.Migrations
                     b.Property<int>("ChatGroupId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("Deadline")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("FromUserId")
                         .HasColumnType("INTEGER");
 
@@ -61,6 +64,39 @@ namespace collegehomework.Migrations
                     b.HasIndex("FromUserId");
 
                     b.ToTable("Messages");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.SentNotification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("DeleteAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("HomeworkMessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("TelegramChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TelegramMessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HomeworkMessageId");
+
+                    b.HasIndex("IsDeleted", "DeleteAt");
+
+                    b.ToTable("SentNotifications");
                 });
 
             modelBuilder.Entity("TelegramBotApi.Models.User", b =>
@@ -87,6 +123,34 @@ namespace collegehomework.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.UserTaskProgress", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("UserId", "MessageId")
+                        .IsUnique();
+
+                    b.ToTable("UserTaskProgresses");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
                 {
                     b.HasOne("TelegramBotApi.Models.ChatGroup", "Group")
@@ -104,6 +168,25 @@ namespace collegehomework.Migrations
                     b.Navigation("FromUser");
 
                     b.Navigation("Group");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.UserTaskProgress", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.Message", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TelegramBotApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
                 });
 #pragma warning restore 612, 618
         }

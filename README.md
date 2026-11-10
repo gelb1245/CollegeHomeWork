@@ -42,18 +42,36 @@ collegehomework/
 ## 🚀 Быстрый старт
 
 ### 1. Настройка токена
-Откройте [Backend/appsettings.json](file:///C:/Users/Alexandr/Desktop/collegehomework/Backend/appsettings.json) и вставьте токен вашего бота от `@BotFather`:
+> ⚠️ **Никогда не коммитьте токен в репозиторий.** `appsettings.json` содержит только пустое значение.
+
+**Локально:** скопируйте `Backend/appsettings.Development.json.example` в `Backend/appsettings.Development.json` (файл в `.gitignore`) и вставьте токен от `@BotFather`:
 ```json
 {
   "Telegram": {
-    "BotToken": "ВАШ_ТОКЕН_ОТ_BOTFATHER",
-    "WebAppUrl": "https://localhost:5001"
+    "BotToken": "ВАШ_ТОКЕН_ОТ_BOTFATHER"
   }
 }
 ```
 
+**На сервере (Render/Docker):** задайте переменные окружения:
+
+| Переменная | Значение |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | токен бота |
+| `ConnectionStrings__Default` | (опционально) путь к БД на постоянном диске, напр. `Data Source=/var/data/telegrambot.db` |
+
+Без токена приложение не запустится и выведет понятную ошибку.
+
+### База данных
+Схема управляется **только миграциями EF Core** (`Backend/Migrations`) и применяется автоматически при старте. Новая миграция после изменения моделей:
+```bash
+dotnet tool restore
+cd Backend && dotnet ef migrations add ИмяМиграции
+```
+Файл `telegrambot.db` содержит личные данные студентов и не хранится в git.
+
 ### 2. Вайтлист
-В [Backend/whitelist.json](file:///C:/Users/Alexandr/Desktop/collegehomework/Backend/whitelist.json) уже добавлен ваш Telegram ID (`1645991235`). Вы можете добавлять других пользователей через запятую:
+В [Backend/whitelist.json](Backend/whitelist.json) уже добавлен ваш Telegram ID (`1645991235`). Вы можете добавлять других пользователей через запятую:
 ```json
 [
   1645991235,
@@ -62,7 +80,7 @@ collegehomework/
 ```
 
 ### 3. Запуск сервера
-Запустите файл [start_backend.bat](file:///C:/Users/Alexandr/Desktop/collegehomework/start_backend.bat) (или выполните `dotnet run` в папке `Backend`).
+Запустите файл [start_backend.bat](start_backend.bat) (или выполните `dotnet run` в папке `Backend`).
 
 Сервер запустится на `https://localhost:5001` и сразу раздает:
 - **Мини-приложение**: `https://localhost:5001/`

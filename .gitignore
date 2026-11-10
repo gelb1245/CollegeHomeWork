@@ -18,3 +18,12 @@ Thumbs.db
 .local/
 Library/
 
+
+## Secrets (local config with bot token)
+appsettings.Development.json
+appsettings.*.local.json
+.env
+
+## SQLite database (contains users' personal data)
+*.db
+*.db-journal

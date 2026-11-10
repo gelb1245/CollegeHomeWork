@@ -40,8 +40,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 // 3. Database with connection pooling and busy timeout
-builder.Services.AddDbContext<TelegramBotContext>(opt =>
-    opt.UseSqlite("Data Source=telegrambot.db;Cache=Shared;Mode=ReadWriteCreate;Default Timeout=15"));
+// Override with env var ConnectionStrings__Default, e.g. "Data Source=/var/data/telegrambot.db"
+// when the database lives on a persistent disk (Render, Docker volume).
+var connectionString = builder.Configuration.GetConnectionString("Default")
+                       ?? "Data Source=telegrambot.db;Cache=Shared;Mode=ReadWriteCreate;Default Timeout=15";
+builder.Services.AddDbContext<TelegramBotContext>(opt => opt.UseSqlite(connectionString));
 
 // 4. Rate Limiting Protection (ASP.NET Core 8)
 builder.Services.AddRateLimiter(options =>
@@ -119,28 +122,23 @@ builder.Services.AddCors(options =>
 // 7. Security & Business Services
 builder.Services.AddSingleton<TelegramRateLimiter>();
 builder.Services.AddSingleton<WhitelistService>();
-builder.Services.AddSingleton<TelegramAuthService>(sp =>
+// Bot token is read ONLY from the environment / user secrets / non-committed config.
+// Never hard-code it: anyone with access to the repository could take over the bot.
+var botToken = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN")
+               ?? builder.Configuration["Telegram:BotToken"];
+if (string.IsNullOrWhiteSpace(botToken) || botToken == "YOUR_BOT_TOKEN_HERE")
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var token = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN") 
-                ?? config["Telegram:BotToken"] 
-                ?? "8588883105:AAF4PXCekltVPEYaGT2W5bIdeaAAMOFPbTE";
-    var logger = sp.GetRequiredService<ILogger<TelegramAuthService>>();
-    return new TelegramAuthService(token, logger);
-});
+    throw new InvalidOperationException(
+        "Не задан токен Telegram-бота. Укажите переменную окружения TELEGRAM_BOT_TOKEN " +
+        "или Telegram:BotToken в appsettings.Development.json / dotnet user-secrets.");
+}
+
+builder.Services.AddSingleton<TelegramAuthService>(sp =>
+    new TelegramAuthService(botToken, sp.GetRequiredService<ILogger<TelegramAuthService>>()));
 builder.Services.AddSingleton<HomeworkNotificationService>();
 
-// 8. Configure Telegram Bot Client with user's token
-builder.Services.AddSingleton<ITelegramBotClient>(sp =>
-{
-    var token = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN") 
-                ?? builder.Configuration["Telegram:BotToken"];
-    if (string.IsNullOrWhiteSpace(token) || token == "YOUR_BOT_TOKEN_HERE")
-    {
-        token = "8588883105:AAF4PXCekltVPEYaGT2W5bIdeaAAMOFPbTE";
-    }
-    return new TelegramBotClient(token);
-});
+// 8. Configure Telegram Bot Client
+builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(botToken));
 
 // Register Background Services (Telegram Polling & 24-hour Notification Auto-Deleter)
 builder.Services.AddHostedService<TelegramBotPollingService>();
@@ -227,53 +225,13 @@ if (frontendPath != null)
 app.UseAuthorization();
 app.MapControllers();
 
-// Initialize SQLite with WAL mode & busy timeout to prevent database locked errors under load
-try
+// Apply EF Core migrations (schema is managed ONLY by migrations — see Backend/Migrations).
+// If this fails the app must not start with a broken schema, so the exception is not swallowed.
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<TelegramBotContext>();
-    await db.Database.EnsureCreatedAsync();
-    await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;");
-    await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = NORMAL;");
-    await db.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout = 5000;");
-
-    // Ensure Deadline column exists on Messages
-    try
-    {
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE Messages ADD COLUMN Deadline TEXT NULL;");
-    }
-    catch { /* Column already exists */ }
-
-    // Ensure UserTaskProgresses table exists
-    await db.Database.ExecuteSqlRawAsync(@"
-        CREATE TABLE IF NOT EXISTS UserTaskProgresses (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            UserId INTEGER NOT NULL,
-            MessageId INTEGER NOT NULL,
-            IsCompleted INTEGER NOT NULL DEFAULT 0,
-            CompletedAt TEXT NULL,
-            CONSTRAINT FK_UserTaskProgresses_Users_UserId FOREIGN KEY (UserId) REFERENCES Users (TelegramId) ON DELETE CASCADE,
-            CONSTRAINT FK_UserTaskProgresses_Messages_MessageId FOREIGN KEY (MessageId) REFERENCES Messages (Id) ON DELETE CASCADE
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS IX_UserTaskProgresses_UserId_MessageId ON UserTaskProgresses (UserId, MessageId);
-
-        CREATE TABLE IF NOT EXISTS SentNotifications (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            TelegramChatId INTEGER NOT NULL,
-            TelegramMessageId INTEGER NOT NULL,
-            HomeworkMessageId INTEGER NOT NULL,
-            SentAt TEXT NOT NULL,
-            DeleteAt TEXT NOT NULL,
-            IsDeleted INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS IX_SentNotifications_IsDeleted_DeleteAt ON SentNotifications (IsDeleted, DeleteAt);
-        CREATE INDEX IF NOT EXISTS IX_SentNotifications_HomeworkMessageId ON SentNotifications (HomeworkMessageId);
-    ");
-}
-catch (Exception ex)
-{
-    var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogWarning(ex, "Не удалось настроить PRAGMA или схему для SQLite");
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    await DatabaseInitializer.InitializeAsync(db, logger);
 }
 
 app.Run();
