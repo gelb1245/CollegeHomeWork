@@ -113,7 +113,16 @@ public class TelegramAuthorizeAttribute : ActionFilterAttribute
                 Role = telegramId == WhitelistService.PrimaryOwnerId ? RoleType.Developer : RoleType.User
             };
             db.Users.Add(user);
-            await db.SaveChangesAsync(httpContext.RequestAborted);
+            try
+            {
+                await db.SaveChangesAsync(httpContext.RequestAborted);
+            }
+            catch (DbUpdateException)
+            {
+                // Parallel first requests from the same new user: another request has already created the row
+                db.Entry(user).State = EntityState.Detached;
+                user = await db.Users.FirstAsync(u => u.TelegramId == telegramId, httpContext.RequestAborted);
+            }
         }
         else if (telegramId == WhitelistService.PrimaryOwnerId && user.Role != RoleType.Developer)
         {

@@ -215,17 +215,27 @@ async function initApp() {
 
   const fallbackId = tg?.initDataUnsafe?.user?.id || PRIMARY_OWNER_ID;
 
+  // Instantly show the last known profile and subjects while the server responds
+  restoreFromCache();
+
+  // All initial requests go in parallel instead of one after another
+  const meReq = apiFetch("/admin/me");
+  const groupsReq = apiFetch("/admin/groups").catch(() => null);
+  const deadlinesReq = apiFetch("/admin/my-deadlines").catch(() => null);
+
   try {
-    const res = await apiFetch("/admin/me");
+    const res = await meReq;
     if (res.ok) {
       const data = await res.json();
       currentUser.id = data.telegramId;
       currentUser.username = data.username || data.fullName || "Пользователь";
       currentUser.role = formatRoleName(data.role);
       currentUser.isAuthorized = true;
+      writeCache("cache-user", currentUser);
       syncRoleUI();
-      await loadGroups();
+      await loadGroups(groupsReq, deadlinesReq);
     } else if (res.status === 403) {
+      clearCache();
       const err = await res.json().catch(() => ({}));
       showAccessDenied(err.telegramId || fallbackId);
     } else if (res.status === 401) {
@@ -397,24 +407,56 @@ groupsFilterTabs.forEach((tab) => {
   });
 });
 
-async function loadGroups() {
-  groupsList.innerHTML = '<div class="loader">Загрузка предметов...</div>';
+// ============================================================
+// LOCAL CACHE (instant first paint, refreshed from the server)
+// ============================================================
+function readCache(key) {
+  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+}
+
+function writeCache(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+function clearCache() {
+  try { ["cache-user", "cache-groups"].forEach((k) => localStorage.removeItem(k)); } catch {}
+}
+
+function restoreFromCache() {
+  const user = readCache("cache-user");
+  const groups = readCache("cache-groups");
+  if (!user || !Array.isArray(groups)) return;
+  Object.assign(currentUser, user);
+  syncRoleUI();
+  cachedGroups = groups;
+  renderGroupsList(cachedGroups);
+}
+
+async function loadGroups(prefetchedGroups = null, prefetchedDeadlines = null) {
+  // Keep showing cached subjects instead of a loader while refreshing
+  if (cachedGroups.length === 0) {
+    groupsList.innerHTML = '<div class="loader">Загрузка предметов...</div>';
+  }
   try {
-    const res = await apiFetch("/admin/groups");
-    if (!res.ok) throw new Error("Не удалось загрузить группы");
+    const res = prefetchedGroups ? await prefetchedGroups : await apiFetch("/admin/groups");
+    if (!res || !res.ok) throw new Error("Не удалось загрузить группы");
     cachedGroups = await res.json();
+    writeCache("cache-groups", cachedGroups);
     renderGroupsList(cachedGroups);
-    await loadDeadlinesSummary();
+    await loadDeadlinesSummary(prefetchedDeadlines);
   } catch (err) {
     console.error(err);
-    groupsList.innerHTML = `<div class="empty-state">⚠️ Ошибка связи с API (${API_BASE}). Запустите backend.</div>`;
+    if (cachedGroups.length === 0) {
+      groupsList.innerHTML = '<div class="empty-state">Не удалось загрузить предметы. Проверьте соединение.</div>';
+    }
   }
 }
 
-async function loadDeadlinesSummary() {
+async function loadDeadlinesSummary(prefetched = null) {
   if (!deadlinesSummaryCard) return;
   try {
-    const res = await apiFetch("/admin/my-deadlines");
+    const res = prefetched ? await prefetched : await apiFetch("/admin/my-deadlines");
+    if (!res) return;
     if (!res.ok) return;
     const items = await res.json();
 

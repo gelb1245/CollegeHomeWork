@@ -143,6 +143,7 @@ builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(bot
 // Register Background Services (Telegram Polling & 24-hour Notification Auto-Deleter)
 builder.Services.AddHostedService<TelegramBotPollingService>();
 builder.Services.AddHostedService<NotificationCleanupService>();
+builder.Services.AddHostedService<KeepAliveService>();
 
 var app = builder.Build();
 
@@ -224,6 +225,9 @@ if (frontendPath != null)
 
 app.UseAuthorization();
 app.MapControllers();
+
+// Lightweight health check (used by KeepAliveService and uptime monitors)
+app.MapGet("/health", () => Results.Text("ok")).DisableRateLimiting();
 
 // Apply EF Core migrations (schema is managed ONLY by migrations — see Backend/Migrations).
 // If this fails the app must not start with a broken schema, so the exception is not swallowed.
