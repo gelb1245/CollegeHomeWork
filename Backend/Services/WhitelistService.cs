@@ -8,7 +8,7 @@ public class WhitelistService
     private readonly HashSet<long> _whitelist = new();
     private readonly object _lock = new();
 
-    public const long PrimaryOwnerId = 1645991235;
+    public const long PrimaryOwnerId = 8663026875;
 
     public WhitelistService(IWebHostEnvironment env)
     {

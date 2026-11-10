@@ -77,7 +77,7 @@ dotnet ef migrations add ИмяМиграции --context PostgresTelegramBotCon
 Файл `telegrambot.db` содержит личные данные студентов и не хранится в git.
 
 ### 2. Вайтлист
-В [Backend/whitelist.json](Backend/whitelist.json) уже добавлен ваш Telegram ID (`1645991235`). Вы можете добавлять других пользователей через запятую:
+В [Backend/whitelist.json](Backend/whitelist.json) уже добавлен Telegram ID владельца (`8663026875`, задаётся константой `PrimaryOwnerId` в `Backend/Services/WhitelistService.cs`). Вы можете добавлять других пользователей через запятую:
 ```json
 [
   1645991235,
