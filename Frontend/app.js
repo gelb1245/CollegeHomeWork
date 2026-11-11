@@ -393,6 +393,8 @@ function switchScreen(screenId) {
 
   syncRoleUI();
   updateTelegramBackButton();
+  // Animated refresh: running slides continue, indicators that were hidden snap into place
+  requestAnimationFrame(() => refreshIndicators(true));
 }
 
 backBtn.addEventListener("click", () => {
@@ -442,7 +444,7 @@ function restoreFromCache() {
 async function loadGroups(prefetchedGroups = null, prefetchedDeadlines = null) {
   // Keep showing cached subjects instead of a loader while refreshing
   if (cachedGroups.length === 0) {
-    groupsList.innerHTML = '<div class="loader">Загрузка предметов...</div>';
+    groupsList.innerHTML = skeleton("group", 3);
   }
   try {
     const res = prefetchedGroups ? await prefetchedGroups : await apiFetch("/admin/groups");
@@ -575,6 +577,8 @@ async function openChat(groupId, name, desc) {
 
   syncRoleUI();
   updateTelegramBackButton();
+  // Animated refresh: running slides continue, indicators that were hidden snap into place
+  requestAnimationFrame(() => refreshIndicators(true));
   await loadMessages(groupId);
 }
 
@@ -630,14 +634,14 @@ function formatInputDateTime(date) {
 }
 
 // Load Messages
-async function loadMessages(groupId, silent = false) {
+async function loadMessages(groupId, silent = false, animate = {}) {
   // silent: refresh in place (pull-to-refresh, after saving) without flashing a loader
-  if (!silent) messagesContainer.innerHTML = '<div class="loader">Загрузка заданий...</div>';
+  if (!silent) messagesContainer.innerHTML = skeleton("message", 2);
   try {
     const res = await apiFetch(`/admin/group/${groupId}/messages`);
     cachedMessages = await res.json();
     updateTaskProgress();
-    renderFilteredMessages();
+    renderFilteredMessages(animate);
   } catch (err) {
     console.error(err);
     messagesContainer.innerHTML = '<div class="empty-state">Ошибка загрузки заданий</div>';
@@ -670,104 +674,161 @@ chatFilterTabs.forEach((tab) => {
 });
 
 // Render messages with Markdown support
-function renderFilteredMessages() {
-  let filtered = cachedMessages;
-  if (currentTaskFilter === "pending") {
-    filtered = cachedMessages.filter((m) => !m.isCompleted);
-  } else if (currentTaskFilter === "completed") {
-    filtered = cachedMessages.filter((m) => m.isCompleted);
-  }
+function filteredMessages() {
+  if (currentTaskFilter === "pending") return cachedMessages.filter((m) => !m.isCompleted);
+  if (currentTaskFilter === "completed") return cachedMessages.filter((m) => m.isCompleted);
+  return cachedMessages;
+}
 
-  if (filtered.length === 0) {
-    let msg = "Пока нет записей. Администратор ещё не опубликовал ДЗ.";
-    if (currentTaskFilter === "pending") msg = "Все задания по этому предмету выполнены.";
-    if (currentTaskFilter === "completed") msg = "Пока нет выполненных заданий.";
-    messagesContainer.innerHTML = `<div class="empty-state">${msg}</div>`;
+function emptyMessagesHtml() {
+  let text = "Пока нет записей. Администратор ещё не опубликовал ДЗ.";
+  if (currentTaskFilter === "pending") text = "Все задания по этому предмету выполнены.";
+  if (currentTaskFilter === "completed") text = "Пока нет выполненных заданий.";
+  return `<div class="empty-state fade-in">${text}</div>`;
+}
+
+/**
+ * Renders the task list.
+ * animate.enter — ids of new tasks (slide in), animate.flash — ids of edited tasks (highlight).
+ */
+function renderFilteredMessages(animate = {}) {
+  const list = filteredMessages();
+  if (list.length === 0) {
+    messagesContainer.innerHTML = emptyMessagesHtml();
     return;
   }
 
+  // Markdown: line breaks and GitHub syntax
+  if (typeof marked !== "undefined") marked.setOptions({ breaks: true, gfm: true });
+
   messagesContainer.innerHTML = "";
-  const canDelete = currentUser.role === "Developer" || currentUser.role === "Admin";
-
-  // Configure marked for safe rendering
-  if (typeof marked !== "undefined") {
-    marked.setOptions({ breaks: true, gfm: true });
-  }
-
-  filtered.forEach((m) => {
-    const card = document.createElement("div");
-    card.className = `message-card ${m.isCompleted ? "completed" : ""}`;
-
-    const date = new Date(m.sentAt);
-    const dateFormatted = date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
-    const timeFormatted = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-
-    const deadlineBadgeHtml = formatDeadlineBadge(m.deadline, m.isCompleted);
-
-    // Render text with Markdown if available, else escape
-    let textHtml;
-    // Markdown is rendered only together with DOMPurify, otherwise HTML in the text would execute (XSS)
-    if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
-      textHtml = DOMPurify.sanitize(marked.parse(m.text || ""));
-    } else {
-      textHtml = escapeHtml(m.text).replace(/\n/g, "<br>");
-    }
-
-    card.innerHTML = `
-      <div class="message-card-header">
-        <span class="message-author">${escapeHtml(m.author)}</span>
-        <div class="message-meta">
-          <span class="message-date">${dateFormatted}, ${timeFormatted}${m.editedAt ? " · изменено" : ""}</span>
-          ${canDelete ? `
-            <button class="msg-action-btn edit-msg-btn" title="Редактировать">${icon("pencil")}</button>
-            <button class="msg-action-btn delete-msg-btn" title="Удалить запись">${icon("close")}</button>` : ""}
-        </div>
-      </div>
-      <div class="message-text">${textHtml}</div>
-      ${renderAttachments(m.attachments)}
-      <div class="message-footer-row">
-        ${deadlineBadgeHtml ? `<div>${deadlineBadgeHtml}</div>` : "<div></div>"}
-        <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}" data-toggle-id="${m.id}">
-          ${m.isCompleted ? `${icon("checkMark")}Сдано` : "Отметить сданным"}
-        </button>
-      </div>
-    `;
-
-    const toggleBtn = card.querySelector(".task-toggle-btn");
-    if (toggleBtn) toggleBtn.addEventListener("click", () => toggleTaskComplete(m.id));
-
-    if (canDelete) {
-      card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
-      card.querySelector(".edit-msg-btn")?.addEventListener("click", () => startEdit(m));
-    }
-    bindAttachmentHandlers(card);
-
+  list.forEach((m) => {
+    const card = createMessageCard(m);
+    if (animate.enter?.includes(m.id)) card.classList.add("card-enter");
+    if (animate.flash?.includes(m.id)) card.classList.add("card-flash");
     messagesContainer.appendChild(card);
   });
 
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  const highlighted = messagesContainer.querySelector(".card-enter, .card-flash");
+  highlighted?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-// Toggle Task Complete
-async function toggleTaskComplete(msgId) {
-  if (window.Telegram?.WebApp?.HapticFeedback) {
-    window.Telegram.WebApp.HapticFeedback.impactOccurred("medium");
+function toggleButtonHtml(isCompleted) {
+  return isCompleted
+    ? `<svg class="ico check-draw" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Сдано`
+    : "Отметить сданным";
+}
+
+function createMessageCard(m) {
+  const canManage = currentUser.role === "Developer" || currentUser.role === "Admin";
+  const card = document.createElement("div");
+  card.className = `message-card ${m.isCompleted ? "completed" : ""}`;
+  card.dataset.id = m.id;
+
+  const date = new Date(m.sentAt);
+  const dateFormatted = date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
+  const timeFormatted = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
+  // Markdown is rendered only together with DOMPurify, otherwise HTML in the text would execute (XSS)
+  const textHtml = typeof marked !== "undefined" && typeof DOMPurify !== "undefined"
+    ? DOMPurify.sanitize(marked.parse(m.text || ""))
+    : escapeHtml(m.text).replace(/\n/g, "<br>");
+
+  card.innerHTML = `
+    <div class="message-card-header">
+      <span class="message-author">${escapeHtml(m.author)}</span>
+      <div class="message-meta">
+        <span class="message-date">${dateFormatted}, ${timeFormatted}${m.editedAt ? " · изменено" : ""}</span>
+        ${canManage ? `
+          <button class="msg-action-btn edit-msg-btn" title="Редактировать">${icon("pencil")}</button>
+          <button class="msg-action-btn delete-msg-btn" title="Удалить запись">${icon("close")}</button>` : ""}
+      </div>
+    </div>
+    <div class="message-text">${textHtml}</div>
+    ${renderAttachments(m.attachments)}
+    <div class="message-footer-row">
+      <div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>
+      <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}">${toggleButtonHtml(m.isCompleted)}</button>
+    </div>
+  `;
+
+  card.querySelector(".task-toggle-btn").addEventListener("click", () => toggleTaskComplete(m.id));
+  if (canManage) {
+    card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
+    card.querySelector(".edit-msg-btn")?.addEventListener("click", () => startEdit(m));
   }
+  bindAttachmentHandlers(card);
+  return card;
+}
+
+const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** Smoothly collapses an element to zero height, then removes it. */
+function collapseAndRemove(el) {
+  return new Promise((resolve) => {
+    if (prefersReducedMotion()) {
+      el.remove();
+      resolve();
+      return;
+    }
+    el.style.height = `${el.offsetHeight}px`;
+    el.getBoundingClientRect(); // fix the start height before the transition
+    el.classList.add("card-leave");
+    el.style.height = "0px";
+    setTimeout(() => {
+      el.remove();
+      resolve();
+    }, 320);
+  });
+}
+
+// Toggle Task Complete — the card is updated in place so the change is animated
+async function toggleTaskComplete(msgId) {
+  const haptic = window.Telegram?.WebApp?.HapticFeedback;
+  haptic?.impactOccurred("medium");
+
+  const card = messagesContainer.querySelector(`.message-card[data-id="${msgId}"]`);
+  const button = card?.querySelector(".task-toggle-btn");
+  if (button) button.disabled = true;
+
   try {
     const res = await apiFetch(`/admin/message/${msgId}/toggle-complete`, { method: "POST" });
-    if (res.ok) {
-      const data = await res.json();
-      const msg = cachedMessages.find((m) => m.id === msgId);
-      if (msg) {
-        msg.isCompleted = data.isCompleted;
-        msg.completedAt = data.completedAt;
-        updateTaskProgress();
-        renderFilteredMessages();
-        await loadDeadlinesSummary();
+    if (!res.ok) {
+      await handleResponseError(res, "Не удалось изменить отметку");
+      return;
+    }
+    const data = await res.json();
+    const msg = cachedMessages.find((m) => m.id === msgId);
+    if (!msg) return;
+    msg.isCompleted = data.isCompleted;
+    msg.completedAt = data.completedAt;
+    if (msg.isCompleted) haptic?.notificationOccurred("success");
+
+    updateTaskProgress();
+    loadDeadlinesSummary();
+
+    const stillVisible = filteredMessages().some((m) => m.id === msgId);
+    if (card && stillVisible) {
+      card.classList.toggle("completed", msg.isCompleted);
+      button.classList.toggle("completed", msg.isCompleted);
+      button.innerHTML = toggleButtonHtml(msg.isCompleted);
+      button.classList.remove("just-done");
+      if (msg.isCompleted) {
+        button.getBoundingClientRect();
+        button.classList.add("just-done");
       }
+      card.querySelector(".deadline-slot").innerHTML = formatDeadlineBadge(msg.deadline, msg.isCompleted);
+    } else if (card) {
+      // The task no longer matches the filter ("Не сдано" / "Сдано") — fold it away
+      await collapseAndRemove(card);
+      if (filteredMessages().length === 0) messagesContainer.innerHTML = emptyMessagesHtml();
+    } else {
+      renderFilteredMessages();
     }
   } catch (err) {
     console.error("Toggle complete error:", err);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -1027,10 +1088,11 @@ sendMessageBtn.addEventListener("click", async () => {
     const res = await apiFetch(path, { method: editing ? "PATCH" : "POST", body: form });
     if (res.ok) {
       saved = true;
+      const { id } = await res.json().catch(() => ({}));
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
       resetComposer();
       updateTelegramBackButton();
-      await loadMessages(currentGroupId, true);
+      await loadMessages(currentGroupId, true, editing ? { flash: [id] } : { enter: [id] });
       await loadDeadlinesSummary();
     } else {
       await handleResponseError(res, editing ? "Не удалось сохранить изменения" : "Не удалось опубликовать задание");
@@ -1051,8 +1113,12 @@ async function deleteMessage(id) {
   try {
     const res = await apiFetch(`/admin/message/${id}`, { method: "DELETE" });
     if (res.ok) {
-      await loadMessages(currentGroupId);
-      await loadDeadlinesSummary();
+      cachedMessages = cachedMessages.filter((m) => m.id !== id);
+      updateTaskProgress();
+      loadDeadlinesSummary();
+      const card = messagesContainer.querySelector(`.message-card[data-id="${id}"]`);
+      if (card) await collapseAndRemove(card);
+      if (filteredMessages().length === 0) messagesContainer.innerHTML = emptyMessagesHtml();
     } else {
       await handleResponseError(res, "Не удалось удалить задание");
     }
@@ -1081,7 +1147,7 @@ deleteCurrentGroupBtn.addEventListener("click", async () => {
 // USERS & WHITELIST
 // ============================================================
 async function loadUsers() {
-  usersList.innerHTML = '<div class="loader">Загрузка участников...</div>';
+  usersList.innerHTML = skeleton("user", 3);
   try {
     const res = await apiFetch("/admin/users");
     if (!res.ok) throw new Error("Не удалось загрузить участников");
@@ -1280,6 +1346,78 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+// ============================================================
+// SKELETON PLACEHOLDERS (instead of "Загрузка…")
+// ============================================================
+function skeleton(kind, count) {
+  const one = {
+    group: `<div class="group-item skeleton-item" aria-hidden="true">
+              <div class="group-avatar skel"></div>
+              <div class="group-info"><div class="skel skel-line w55"></div><div class="skel skel-line sm w80"></div></div>
+            </div>`,
+    message: `<div class="message-card skeleton-item" aria-hidden="true">
+              <div class="skel skel-line sm w30"></div>
+              <div class="skel skel-line w90"></div><div class="skel skel-line w65"></div>
+              <div class="skel skel-pill"></div>
+            </div>`,
+    user: `<div class="user-card skeleton-item" aria-hidden="true">
+              <div class="user-avatar skel"></div>
+              <div class="user-info"><div class="skel skel-line w45"></div><div class="skel skel-line sm w70"></div></div>
+            </div>`
+  }[kind];
+  return `<div class="skeleton-list" aria-label="Загрузка">${one.repeat(count)}</div>`;
+}
+
+// ============================================================
+// SLIDING INDICATOR for segmented controls and the bottom nav
+// ============================================================
+const indicatorUpdaters = [];
+
+/** Adds a pill that slides to the active item instead of the highlight jumping. */
+function setupSlidingIndicator(container, itemSelector) {
+  if (!container) return;
+  const pill = document.createElement("span");
+  pill.className = "slide-indicator";
+  pill.setAttribute("aria-hidden", "true");
+  container.prepend(pill);
+  container.classList.add("has-indicator");
+
+  const update = (animate = true) => {
+    const active = container.querySelector(`${itemSelector}.active:not(.hidden)`);
+    if (!active || active.offsetWidth === 0) {
+      pill.style.opacity = "0";
+      return;
+    }
+    if (!animate || pill.style.opacity === "0" || !pill.style.width) pill.classList.add("no-anim");
+    pill.style.opacity = "1";
+    pill.style.width = `${active.offsetWidth}px`;
+    pill.style.height = `${active.offsetHeight}px`;
+    pill.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    pill.getBoundingClientRect();
+    pill.classList.remove("no-anim");
+  };
+
+  // Follow "active" changes of the items (and items being shown/hidden by role)
+  // (changes of the pill's own class are ignored, otherwise the observer would trigger itself forever)
+  new MutationObserver((records) => {
+    if (records.some((r) => r.target !== pill)) update();
+  }).observe(container, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  indicatorUpdaters.push(update);
+  requestAnimationFrame(() => update(false));
+}
+
+/** Re-measure all indicators (after a screen becomes visible, on resize, after fonts load). */
+function refreshIndicators(animate = false) {
+  indicatorUpdaters.forEach((update) => update(animate));
+}
+
+setupSlidingIndicator(document.querySelector(".groups-filter-tabs"), ".groups-filter-tab");
+setupSlidingIndicator(document.querySelector(".chat-filter-tabs"), ".chat-filter-tab");
+setupSlidingIndicator(document.querySelector(".theme-toggle-group"), ".theme-btn");
+setupSlidingIndicator(document.querySelector(".bottom-nav"), ".nav-item");
+window.addEventListener("resize", () => refreshIndicators(false));
+document.fonts?.ready.then(() => refreshIndicators(false));
 
 // ============================================================
 // TELEGRAM BACK BUTTON

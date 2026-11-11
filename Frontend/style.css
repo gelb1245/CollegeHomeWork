@@ -45,6 +45,9 @@
   --nav-bg:          rgba(28,28,30,0.72);
   --nav-border:      rgba(255,255,255,0.10);
   --nav-shadow:      0 12px 40px rgba(0,0,0,0.6);
+  --skel-base:       rgba(255,255,255,0.06);
+  --skel-hi:         rgba(255,255,255,0.13);
+  --ease-out:        cubic-bezier(0.22, 1, 0.36, 1);
 
   --radius-card:     18px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -95,6 +98,8 @@
   --nav-bg:          rgba(255,255,255,0.72);
   --nav-border:      rgba(255,255,255,0.9);
   --nav-shadow:      0 12px 36px rgba(20,20,30,0.12);
+  --skel-base:       rgba(0,0,0,0.06);
+  --skel-hi:         rgba(0,0,0,0.11);
   color-scheme: light;
 }
 
@@ -776,6 +781,7 @@ button { font-family: var(--font); }
 }
 
 .message-card.completed { opacity: 0.62; }
+.message-card { transition: opacity 0.3s ease; }
 
 .message-card-header {
   display: flex;
@@ -1630,6 +1636,126 @@ button { font-family: var(--font); }
 .hidden {
   display: none !important;
 }
+
+/* ============================================
+   MOTION — short, transform/opacity only (fast on low-end phones)
+   ============================================ */
+
+/* ---------- Skeleton placeholders ---------- */
+.skeleton-list { display: flex; flex-direction: column; gap: inherit; }
+.groups-list .skeleton-list { gap: 8px; }
+.messages-container .skeleton-list,
+.users-list .skeleton-list { gap: 8px; }
+
+.skeleton-item { pointer-events: none; }
+.skeleton-item.message-card { display: flex; flex-direction: column; gap: 8px; }
+
+.skel {
+  background: linear-gradient(90deg, var(--skel-base) 0%, var(--skel-hi) 50%, var(--skel-base) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+  border-radius: 6px;
+}
+.group-avatar.skel,
+.user-avatar.skel { box-shadow: none; }
+.user-avatar.skel { border-radius: 50%; }
+.skel-line { height: 12px; margin: 4px 0; }
+.skel-line.sm { height: 9px; }
+.skel-pill { width: 110px; height: 22px; border-radius: 999px; margin-top: 4px; }
+.w30 { width: 30%; } .w45 { width: 45%; } .w55 { width: 55%; } .w65 { width: 65%; }
+.w70 { width: 70%; } .w80 { width: 80%; } .w90 { width: 90%; }
+
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
+.fade-in { animation: fade-in 0.25s ease; }
+
+/* ---------- Task appears / is edited / leaves ---------- */
+.card-enter { animation: card-enter 0.38s var(--ease-out); }
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.card-flash { animation: card-flash 1s ease; }
+@keyframes card-flash {
+  0%, 100% { box-shadow: var(--surface-hi), var(--surface-shadow); }
+  30%      { box-shadow: var(--surface-hi), 0 0 0 2px var(--accent); }
+}
+
+.card-leave {
+  overflow: hidden;
+  opacity: 0;
+  transform: scale(0.96);
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-bottom: -8px; /* also fold the gap of the list */
+  border-width: 0;
+  transition: height 0.3s var(--ease-out), opacity 0.2s ease, transform 0.3s var(--ease-out),
+              padding 0.3s var(--ease-out), margin 0.3s var(--ease-out);
+}
+
+/* ---------- "Сдано": checkmark draws itself, button pops ---------- */
+.task-toggle-btn { transition: transform 0.12s ease, background 0.25s ease, color 0.25s ease; }
+.task-toggle-btn.just-done { animation: pop 0.35s var(--ease-out); }
+.task-toggle-btn.just-done .check-draw path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: draw 0.35s 0.05s ease forwards;
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.task-toggle-btn:disabled { opacity: 0.7; }
+
+/* ---------- Sliding indicator (segmented controls, bottom nav) ---------- */
+/* Offset parent for the pill (the bottom nav is already position: fixed — keep it) */
+.groups-filter-tabs, .chat-filter-tabs, .theme-toggle-group { position: relative; }
+.slide-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  background: var(--seg-active);
+  box-shadow: var(--seg-shadow);
+  pointer-events: none;
+  transition: transform 0.32s var(--ease-out), width 0.32s var(--ease-out), opacity 0.2s ease;
+}
+.slide-indicator.no-anim { transition: none; }
+.has-indicator > :not(.slide-indicator) { position: relative; z-index: 1; }
+
+.groups-filter-tabs .slide-indicator,
+.chat-filter-tabs .slide-indicator { border-radius: 9px; }
+.theme-toggle-group .slide-indicator { border-radius: 8px; }
+.bottom-nav .slide-indicator { border-radius: 26px; }
+
+/* The pill draws the highlight, the item itself stays transparent */
+.has-indicator .groups-filter-tab.active,
+.has-indicator .chat-filter-tab.active,
+.has-indicator .theme-btn.active,
+.has-indicator .nav-item.active {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---------- Press feedback: everything tappable shrinks a little ---------- */
+.group-item, .attach-doc, .filter-tab, .preset-btn, .pill-btn, .icon-btn, .attach-btn,
+.msg-action-btn, .nav-item, .groups-filter-tab, .chat-filter-tab, .theme-btn,
+.primary-btn-sm, .edit-cancel-btn, .composer-chip-remove, .close-btn, .attach-photo {
+  transition-property: transform, background, color, box-shadow, opacity;
+  transition-duration: 0.12s, 0.2s, 0.2s, 0.2s, 0.2s;
+}
+.group-item:active, .attach-doc:active { transform: scale(0.98); }
+.filter-tab:active, .preset-btn:active, .pill-btn:active, .icon-btn:active, .attach-btn:active,
+.msg-action-btn:active, .nav-item:active, .groups-filter-tab:active, .chat-filter-tab:active,
+.theme-btn:active, .primary-btn-sm:active, .edit-cancel-btn:active, .composer-chip-remove:active,
+.close-btn:active { transform: scale(0.94); }
+.attach-photo:active img { transform: scale(0.97); transition: transform 0.12s; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
