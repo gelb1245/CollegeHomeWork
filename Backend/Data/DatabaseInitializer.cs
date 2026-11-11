@@ -19,7 +19,9 @@ public static class DatabaseInitializer
         {
             // PostgreSQL: schema is fully managed by Migrations/Postgres, no legacy databases to adopt
             logger.LogInformation("База данных: {Provider}. Применение миграций...", db.Database.ProviderName);
+            var isNewPostgres = !(await db.Database.GetAppliedMigrationsAsync(ct)).Any();
             await db.Database.MigrateAsync(ct);
+            if (isNewPostgres) await SeedDefaultsAsync(db, logger, ct);
             return;
         }
 
@@ -55,12 +57,30 @@ public static class DatabaseInitializer
             }
         }
 
+        var isNewSqlite = !usersTableExists;
         await db.Database.MigrateAsync(ct);
+        if (isNewSqlite) await SeedDefaultsAsync(db, logger, ct);
 
         // WAL mode & busy timeout to prevent "database is locked" errors under load
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL;", ct);
         await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous = NORMAL;", ct);
         await db.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout = 5000;", ct);
+    }
+
+    /// <summary>
+    /// Fills a brand-new database with starter subjects. Runs only once, when the database is created,
+    /// so subjects deleted by the developer do not come back.
+    /// </summary>
+    private static async Task SeedDefaultsAsync(TelegramBotContext db, ILogger logger, CancellationToken ct)
+    {
+        if (await db.ChatGroups.AnyAsync(ct)) return;
+
+        db.ChatGroups.AddRange(
+            new Models.ChatGroup { Name = "История", Description = "Лекции и домашние задания по Истории" },
+            new Models.ChatGroup { Name = "Всесвит", Description = "Всемирная история и география" },
+            new Models.ChatGroup { Name = "ДЗ Общее", Description = "Срочные задания и дедлайны по всем предметам" });
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Новая база: добавлены стандартные предметы.");
     }
 
     /// <summary>

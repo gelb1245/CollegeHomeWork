@@ -49,6 +49,11 @@ const ICONS = {
   lock: '<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   checkMark: '<path d="M20 6 9 17l-5-5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  send: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
+  spinner: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
 };
 
@@ -84,10 +89,9 @@ function getSubjectIcon(name) {
 // Centralized API fetcher with Telegram HMAC-SHA256 initData
 async function apiFetch(path, options = {}) {
   const initData = window.Telegram?.WebApp?.initData || "";
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {})
-  };
+  const headers = { ...(options.headers || {}) };
+  // FormData (file uploads) sets its own multipart Content-Type with boundary
+  if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
   if (initData) headers["Authorization"] = `Bearer ${initData}`;
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   return res;
@@ -211,6 +215,8 @@ async function initApp() {
   if (tg) {
     tg.ready();
     tg.expand();
+    // Pulling down must refresh the list instead of minimizing the Mini App (Bot API 7.7+)
+    try { tg.disableVerticalSwipes?.(); } catch {}
   }
 
   const fallbackId = tg?.initDataUnsafe?.user?.id || PRIMARY_OWNER_ID;
@@ -386,6 +392,7 @@ function switchScreen(screenId) {
   }
 
   syncRoleUI();
+  updateTelegramBackButton();
 }
 
 backBtn.addEventListener("click", () => {
@@ -564,11 +571,10 @@ async function openChat(groupId, name, desc) {
   // Update nav active state
   navItems.forEach((btn) => btn.classList.remove("active"));
 
-  if (adminDeadlineInput) adminDeadlineInput.value = "";
-  if (deadlineContainer) deadlineContainer.classList.add("hidden");
-  updateDeadlinePreview();
+  resetComposer();
 
   syncRoleUI();
+  updateTelegramBackButton();
   await loadMessages(groupId);
 }
 
@@ -624,8 +630,9 @@ function formatInputDateTime(date) {
 }
 
 // Load Messages
-async function loadMessages(groupId) {
-  messagesContainer.innerHTML = '<div class="loader">Загрузка заданий...</div>';
+async function loadMessages(groupId, silent = false) {
+  // silent: refresh in place (pull-to-refresh, after saving) without flashing a loader
+  if (!silent) messagesContainer.innerHTML = '<div class="loader">Загрузка заданий...</div>';
   try {
     const res = await apiFetch(`/admin/group/${groupId}/messages`);
     cachedMessages = await res.json();
@@ -709,12 +716,15 @@ function renderFilteredMessages() {
     card.innerHTML = `
       <div class="message-card-header">
         <span class="message-author">${escapeHtml(m.author)}</span>
-        <div>
-          <span class="message-date">${dateFormatted}, ${timeFormatted}</span>
-          ${canDelete ? `<button class="delete-msg-btn" data-msg-id="${m.id}" title="Удалить запись">✕</button>` : ""}
+        <div class="message-meta">
+          <span class="message-date">${dateFormatted}, ${timeFormatted}${m.editedAt ? " · изменено" : ""}</span>
+          ${canDelete ? `
+            <button class="msg-action-btn edit-msg-btn" title="Редактировать">${icon("pencil")}</button>
+            <button class="msg-action-btn delete-msg-btn" title="Удалить запись">${icon("close")}</button>` : ""}
         </div>
       </div>
       <div class="message-text">${textHtml}</div>
+      ${renderAttachments(m.attachments)}
       <div class="message-footer-row">
         ${deadlineBadgeHtml ? `<div>${deadlineBadgeHtml}</div>` : "<div></div>"}
         <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}" data-toggle-id="${m.id}">
@@ -727,9 +737,10 @@ function renderFilteredMessages() {
     if (toggleBtn) toggleBtn.addEventListener("click", () => toggleTaskComplete(m.id));
 
     if (canDelete) {
-      const delBtn = card.querySelector(".delete-msg-btn");
-      if (delBtn) delBtn.addEventListener("click", () => deleteMessage(m.id));
+      card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
+      card.querySelector(".edit-msg-btn")?.addEventListener("click", () => startEdit(m));
     }
+    bindAttachmentHandlers(card);
 
     messagesContainer.appendChild(card);
   });
@@ -781,33 +792,256 @@ function formatDeadlineBadge(deadlineStr, isCompleted) {
   return `<span class="deadline-badge normal">${icon("clock")}${formattedDate} · ${diffDays} дн</span>`;
 }
 
-// Send Message
+// ============================================================
+// ATTACHMENTS (photos, PDF) — viewing
+// ============================================================
+function formatFileSize(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`;
+}
+
+function renderAttachments(attachments) {
+  if (!attachments || attachments.length === 0) return "";
+  const images = attachments.filter((a) => a.isImage);
+  const docs = attachments.filter((a) => !a.isImage);
+
+  const imagesHtml = images.length
+    ? `<div class="attach-grid count-${Math.min(images.length, 3)}">${images.map((a) => `
+        <button type="button" class="attach-photo" data-photo="${escapeHtml(a.url)}">
+          <img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName)}" loading="lazy" />
+        </button>`).join("")}</div>`
+    : "";
+
+  const docsHtml = docs.map((a) => `
+    <button type="button" class="attach-doc" data-doc="${escapeHtml(a.url)}">
+      <span class="attach-doc-icon">${icon("fileText")}</span>
+      <span class="attach-doc-info">
+        <span class="attach-doc-name">${escapeHtml(a.fileName)}</span>
+        <span class="attach-doc-size">PDF · ${formatFileSize(a.size)}</span>
+      </span>
+    </button>`).join("");
+
+  return `<div class="message-attachments">${imagesHtml}${docsHtml}</div>`;
+}
+
+function bindAttachmentHandlers(root) {
+  root.querySelectorAll("[data-photo]").forEach((el) =>
+    el.addEventListener("click", () => openLightbox(el.dataset.photo)));
+  root.querySelectorAll("[data-doc]").forEach((el) =>
+    el.addEventListener("click", () => openDocument(el.dataset.doc)));
+}
+
+function openDocument(url) {
+  const absolute = new URL(url, window.location.origin).toString();
+  const tg = window.Telegram?.WebApp;
+  // Inside Telegram a PDF opens in the system viewer/browser; elsewhere in a new tab
+  if (tg?.openLink && tg.initData) tg.openLink(absolute);
+  else window.open(absolute, "_blank", "noopener");
+}
+
+const lightbox = document.getElementById("lightbox");
+const lightboxImg = document.getElementById("lightboxImg");
+
+function openLightbox(url) {
+  lightboxImg.src = url;
+  lightbox.classList.remove("hidden");
+  updateTelegramBackButton();
+}
+
+function closeLightbox() {
+  lightbox.classList.add("hidden");
+  lightboxImg.removeAttribute("src");
+  updateTelegramBackButton();
+}
+
+lightbox.addEventListener("click", closeLightbox);
+
+// ============================================================
+// COMPOSER — publish / edit with files
+// ============================================================
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const composerFilesEl = document.getElementById("composerFiles");
+const fileInput = document.getElementById("fileInput");
+const attachBtn = document.getElementById("attachBtn");
+const editBanner = document.getElementById("editBanner");
+const cancelEditBtn = document.getElementById("cancelEditBtn");
+
+let composer = {
+  editingId: null,   // id of the task being edited, null = new task
+  newFiles: [],      // File objects to upload: { file, previewUrl }
+  existing: [],      // attachments already saved (edit mode)
+  removeIds: []      // saved attachments to delete on save
+};
+
+function resetComposer() {
+  composer.newFiles.forEach((f) => f.previewUrl && URL.revokeObjectURL(f.previewUrl));
+  composer = { editingId: null, newFiles: [], existing: [], removeIds: [] };
+  adminMessageInput.value = "";
+  if (adminDeadlineInput) adminDeadlineInput.value = "";
+  if (deadlineContainer) deadlineContainer.classList.add("hidden");
+  editBanner.classList.add("hidden");
+  sendMessageBtn.innerHTML = `<svg class="ico" viewBox="0 0 24 24">${ICONS.send}</svg>`;
+  sendMessageBtn.title = "Опубликовать ДЗ";
+  updateDeadlinePreview();
+  renderComposerFiles();
+}
+
+function startEdit(m) {
+  resetComposer();
+  composer.editingId = m.id;
+  composer.existing = (m.attachments || []).slice();
+  adminMessageInput.value = m.text || "";
+  if (m.deadline && adminDeadlineInput) adminDeadlineInput.value = formatInputDateTime(new Date(m.deadline));
+  editBanner.classList.remove("hidden");
+  sendMessageBtn.innerHTML = `<svg class="ico" viewBox="0 0 24 24">${ICONS.checkMark}</svg>`;
+  sendMessageBtn.title = "Сохранить изменения";
+  updateDeadlinePreview();
+  renderComposerFiles();
+  adminMessageInput.focus();
+  updateTelegramBackButton();
+}
+
+cancelEditBtn.addEventListener("click", () => {
+  resetComposer();
+  updateTelegramBackButton();
+});
+
+function attachmentsCount() {
+  return composer.existing.length + composer.newFiles.length;
+}
+
+function renderComposerFiles() {
+  const items = [
+    ...composer.existing.map((a) => ({
+      key: `e${a.id}`, name: a.fileName, isImage: a.isImage, preview: a.isImage ? a.url : null
+    })),
+    ...composer.newFiles.map((f, i) => ({
+      key: `n${i}`, name: f.file.name, isImage: f.file.type.startsWith("image/"), preview: f.previewUrl
+    }))
+  ];
+
+  composerFilesEl.classList.toggle("hidden", items.length === 0);
+  composerFilesEl.innerHTML = items.map((it) => `
+    <div class="composer-chip">
+      ${it.isImage && it.preview
+        ? `<img src="${escapeHtml(it.preview)}" alt="" />`
+        : `<span class="composer-chip-icon">${icon("fileText")}</span>`}
+      <span class="composer-chip-name">${escapeHtml(it.name)}</span>
+      <button type="button" class="composer-chip-remove" data-remove="${it.key}" title="Убрать">${icon("close")}</button>
+    </div>`).join("");
+
+  composerFilesEl.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.remove;
+      if (key.startsWith("e")) {
+        const id = Number(key.slice(1));
+        composer.existing = composer.existing.filter((a) => a.id !== id);
+        composer.removeIds.push(id);
+      } else {
+        const [removed] = composer.newFiles.splice(Number(key.slice(1)), 1);
+        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      }
+      renderComposerFiles();
+    });
+  });
+}
+
+attachBtn.addEventListener("click", () => {
+  if (attachmentsCount() >= MAX_FILES) {
+    alert(`Можно прикрепить не больше ${MAX_FILES} файлов.`);
+    return;
+  }
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", async () => {
+  const picked = Array.from(fileInput.files || []);
+  fileInput.value = "";
+  for (const original of picked) {
+    if (attachmentsCount() >= MAX_FILES) {
+      alert(`Можно прикрепить не больше ${MAX_FILES} файлов.`);
+      break;
+    }
+    const isPdf = original.type === "application/pdf";
+    const isImage = /^image\/(jpeg|png|webp|gif)$/.test(original.type);
+    if (!isPdf && !isImage) {
+      alert(`«${original.name}»: можно прикреплять только фото (JPG, PNG, WEBP, GIF) и PDF.`);
+      continue;
+    }
+    const file = isImage ? await compressImage(original) : original;
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`«${original.name}» больше 20 МБ.`);
+      continue;
+    }
+    composer.newFiles.push({ file, previewUrl: isImage ? URL.createObjectURL(file) : null });
+  }
+  renderComposerFiles();
+});
+
+/**
+ * Shrinks large photos before upload (max 2048 px, JPEG 85%):
+ * a phone photo goes from ~4 MB to ~400 KB — faster upload and faster loading for students.
+ */
+async function compressImage(file) {
+  if (file.type === "image/gif" || file.size < 600 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg" });
+  } catch {
+    return file; // the browser cannot decode it — upload as is
+  }
+}
+
+// Publish a new task or save the edited one
 sendMessageBtn.addEventListener("click", async () => {
   const text = adminMessageInput.value.trim();
   if (!text || !currentGroupId) return;
-  const deadline = adminDeadlineInput?.value ? new Date(adminDeadlineInput.value).toISOString() : null;
 
+  const form = new FormData();
+  form.append("text", text);
+  form.append("deadline", adminDeadlineInput?.value ? new Date(adminDeadlineInput.value).toISOString() : "");
+  composer.newFiles.forEach((f) => form.append("files", f.file, f.file.name));
+
+  const editing = composer.editingId !== null;
+  if (editing) composer.removeIds.forEach((id) => form.append("removeAttachmentIds", String(id)));
+
+  const path = editing ? `/admin/message/${composer.editingId}` : `/admin/group/${currentGroupId}/message`;
+  const hasFiles = composer.newFiles.length > 0;
+
+  const previousIcon = sendMessageBtn.innerHTML;
+  let saved = false;
   sendMessageBtn.disabled = true;
+  sendMessageBtn.classList.add("loading");
+  sendMessageBtn.innerHTML = `<svg class="ico" viewBox="0 0 24 24">${ICONS.spinner}</svg>`;
   try {
-    const res = await apiFetch(`/admin/group/${currentGroupId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ text, deadline })
-    });
+    const res = await apiFetch(path, { method: editing ? "PATCH" : "POST", body: form });
     if (res.ok) {
-      adminMessageInput.value = "";
-      if (adminDeadlineInput) adminDeadlineInput.value = "";
-      if (deadlineContainer) deadlineContainer.classList.add("hidden");
-      updateDeadlinePreview();
-      await loadMessages(currentGroupId);
+      saved = true;
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+      resetComposer();
+      updateTelegramBackButton();
+      await loadMessages(currentGroupId, true);
       await loadDeadlinesSummary();
     } else {
-      await handleResponseError(res, "Не удалось отправить сообщение");
+      await handleResponseError(res, editing ? "Не удалось сохранить изменения" : "Не удалось опубликовать задание");
     }
   } catch (e) {
     console.error(e);
-    alert("Ошибка соединения");
+    alert(hasFiles ? "Ошибка соединения при загрузке файлов. Попробуйте ещё раз." : "Ошибка соединения");
   } finally {
     sendMessageBtn.disabled = false;
+    sendMessageBtn.classList.remove("loading");
+    if (!saved) sendMessageBtn.innerHTML = previousIcon; // on success resetComposer() already set the icon
   }
 });
 
@@ -1046,6 +1280,131 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+// ============================================================
+// TELEGRAM BACK BUTTON
+// ============================================================
+const isInsideTelegram = () => Boolean(window.Telegram?.WebApp?.initData);
+
+/** What the Back button should do right now (most specific first), or null. */
+function currentBackAction() {
+  if (!lightbox.classList.contains("hidden")) return closeLightbox;
+  if (!addUserModal.classList.contains("hidden")) return () => {
+    addUserModal.classList.add("hidden");
+    updateTelegramBackButton();
+  };
+  if (composer.editingId !== null) return () => {
+    resetComposer();
+    updateTelegramBackButton();
+  };
+  if (chatScreen.classList.contains("active")) return () => switchScreen("groupsScreen");
+  return null;
+}
+
+function updateTelegramBackButton() {
+  const action = currentBackAction();
+  const inChat = chatScreen.classList.contains("active");
+  const tgBack = window.Telegram?.WebApp?.BackButton;
+
+  if (isInsideTelegram() && tgBack) {
+    // Native button in the Telegram header replaces our own
+    backBtn.classList.add("hidden");
+    if (action) tgBack.show(); else tgBack.hide();
+  } else {
+    backBtn.classList.toggle("hidden", !inChat);
+  }
+}
+
+window.Telegram?.WebApp?.BackButton?.onClick(() => {
+  window.Telegram.WebApp.HapticFeedback?.impactOccurred("light");
+  currentBackAction()?.();
+});
+
+// The add-user modal is opened/closed in several places — follow its visibility
+new MutationObserver(updateTelegramBackButton).observe(addUserModal, { attributes: true, attributeFilter: ["class"] });
+
+// ============================================================
+// PULL TO REFRESH
+// ============================================================
+const PULL_THRESHOLD = 64;
+const PULL_MAX = 96;
+
+const pullIndicator = document.createElement("div");
+pullIndicator.className = "pull-indicator";
+pullIndicator.innerHTML = `<svg class="ico" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>`;
+document.body.appendChild(pullIndicator);
+
+let pull = { startY: null, distance: 0, refreshing: false };
+
+function refreshCurrentScreen() {
+  if (chatScreen.classList.contains("active") && currentGroupId) {
+    return Promise.all([loadMessages(currentGroupId, true), loadDeadlinesSummary()]);
+  }
+  if (usersScreen.classList.contains("active")) return loadUsers();
+  if (groupsScreen.classList.contains("active")) return loadGroups();
+  return null;
+}
+
+function setPullPosition(distance) {
+  const progress = Math.min(distance / PULL_THRESHOLD, 1);
+  pullIndicator.style.transform = `translate(-50%, ${distance - 48}px) rotate(${progress * 270}deg)`;
+  pullIndicator.style.opacity = String(progress);
+  pullIndicator.classList.toggle("ready", distance >= PULL_THRESHOLD);
+}
+
+document.addEventListener("touchstart", (e) => {
+  if (pull.refreshing || window.scrollY > 0 || currentBackAction() === closeLightbox) return;
+  // Do not hijack gestures inside inputs, the composer or horizontally scrolling chips
+  if (e.target.closest("textarea, input, select, .chat-input-bar-wrapper, .filter-tabs, .modal-overlay")) return;
+  pull.startY = e.touches[0].clientY;
+  pull.distance = 0;
+}, { passive: true });
+
+document.addEventListener("touchmove", (e) => {
+  if (pull.startY === null) return;
+  const dy = e.touches[0].clientY - pull.startY;
+  if (dy <= 0 || window.scrollY > 0) {
+    pull.startY = null;
+    setPullPosition(0);
+    return;
+  }
+  e.preventDefault(); // stop the page bounce while pulling
+  const previous = pull.distance;
+  pull.distance = Math.min(dy * 0.5, PULL_MAX);
+  if (previous < PULL_THRESHOLD && pull.distance >= PULL_THRESHOLD) {
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
+  }
+  setPullPosition(pull.distance);
+}, { passive: false });
+
+document.addEventListener("touchend", async () => {
+  if (pull.startY === null) return;
+  const shouldRefresh = pull.distance >= PULL_THRESHOLD;
+  pull.startY = null;
+
+  if (!shouldRefresh) {
+    setPullPosition(0);
+    return;
+  }
+
+  const task = refreshCurrentScreen();
+  if (!task) {
+    setPullPosition(0);
+    return;
+  }
+
+  pull.refreshing = true;
+  pullIndicator.classList.add("spinning");
+  pullIndicator.style.transform = `translate(-50%, ${PULL_THRESHOLD - 48}px)`;
+  try {
+    await task;
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+  } finally {
+    pull.refreshing = false;
+    pullIndicator.classList.remove("spinning");
+    setPullPosition(0);
+  }
+});
 
 // ============================================================
 // START

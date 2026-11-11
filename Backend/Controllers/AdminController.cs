@@ -9,17 +9,6 @@ using TelegramBotApi.Services;
 
 namespace TelegramBotApi.Controllers;
 
-public record MessageResponseDto(
-    int Id,
-    int ChatGroupId,
-    long FromUserId,
-    string Author,
-    string Text,
-    DateTime SentAt,
-    DateTime? Deadline,
-    bool IsCompleted,
-    DateTime? CompletedAt);
-
 public record GroupResponseDto(int Id, string Name, string? Description, int MessageCount);
 
 public record CreateGroupDto(
@@ -28,12 +17,6 @@ public record CreateGroupDto(
     string Name,
     [StringLength(500, ErrorMessage = "Описание не должно превышать 500 символов")]
     string? Description);
-
-public record CreateMessageDto(
-    [Required(ErrorMessage = "Текст сообщения обязателен")]
-    [StringLength(4000, MinimumLength = 1, ErrorMessage = "Длина сообщения должна быть от 1 до 4000 символов")]
-    string Text,
-    DateTime? Deadline);
 
 public record CreateUserDto(
     [Range(1, long.MaxValue, ErrorMessage = "Некорректный Telegram ID")]
@@ -52,7 +35,6 @@ public class AdminController : ControllerBase
 {
     private readonly TelegramBotContext _db;
     private readonly WhitelistService _whitelist;
-    private readonly HomeworkNotificationService _notifications;
     private readonly ILogger<AdminController> _log;
 
     private User CurrentUser => (User)HttpContext.Items["CurrentUser"]!;
@@ -60,12 +42,10 @@ public class AdminController : ControllerBase
     public AdminController(
         TelegramBotContext db,
         WhitelistService whitelist,
-        HomeworkNotificationService notifications,
         ILogger<AdminController> log)
     {
         _db = db;
         _whitelist = whitelist;
-        _notifications = notifications;
         _log = log;
     }
 
@@ -116,19 +96,7 @@ public class AdminController : ControllerBase
     [HttpGet("groups")]
     public async Task<ActionResult<IEnumerable<GroupResponseDto>>> GetAllGroups(CancellationToken cancellationToken)
     {
-        var groups = await _db.ChatGroups.AsNoTracking().ToListAsync(cancellationToken);
-        if (groups.Count == 0)
-        {
-            var defaultGroups = new List<ChatGroup>
-            {
-                new() { Name = "История", Description = "Лекции и домашние задания по Истории" },
-                new() { Name = "Всесвит", Description = "Всемирная история и география" },
-                new() { Name = "ДЗ Общее", Description = "Срочные задания и дедлайны по всем предметам" }
-            };
-            _db.ChatGroups.AddRange(defaultGroups);
-            await _db.SaveChangesAsync(cancellationToken);
-            groups = defaultGroups;
-        }
+        var groups = await _db.ChatGroups.AsNoTracking().OrderBy(g => g.Id).ToListAsync(cancellationToken);
 
         // Badge count: tasks in the subject that the current user has not marked as completed yet
         var userId = CurrentUser.TelegramId;
@@ -277,212 +245,5 @@ public class AdminController : ControllerBase
         }
 
         return Ok(new { message = $"Пользователь {telegramId} удален из вайтлиста и системы." });
-    }
-
-    // ---------- Messages & Deadlines ----------
-    [HttpGet("group/{groupId}/messages")]
-    public async Task<ActionResult<IEnumerable<MessageResponseDto>>> GetMessages(
-        int groupId,
-        [FromQuery] int limit = 100,
-        CancellationToken cancellationToken = default)
-    {
-        if (groupId <= 0) return BadRequest("Некорректный ID группы.");
-        limit = Math.Clamp(limit, 1, 100);
-
-        var currentUserId = CurrentUser.TelegramId;
-
-        var rawMsgs = await _db.Messages
-            .AsNoTracking()
-            .Where(m => m.ChatGroupId == groupId)
-            .OrderByDescending(m => m.SentAt)
-            .Take(limit)
-            .Select(m => new
-            {
-                m.Id,
-                m.ChatGroupId,
-                m.FromUserId,
-                Author = m.FromUser != null ? (m.FromUser.FullName ?? m.FromUser.Username) : "Администратор",
-                m.Text,
-                m.SentAt,
-                m.Deadline
-            })
-            .ToListAsync(cancellationToken);
-
-        var messageIds = rawMsgs.Select(m => m.Id).ToList();
-        var progressMap = await _db.UserTaskProgresses
-            .AsNoTracking()
-            .Where(p => p.UserId == currentUserId && messageIds.Contains(p.MessageId))
-            .ToDictionaryAsync(p => p.MessageId, p => new { p.IsCompleted, p.CompletedAt }, cancellationToken);
-
-        var msgs = rawMsgs
-            .OrderBy(m => m.SentAt)
-            .Select(m =>
-            {
-                var hasProg = progressMap.TryGetValue(m.Id, out var prog);
-                return new MessageResponseDto(
-                    m.Id,
-                    m.ChatGroupId,
-                    m.FromUserId,
-                    m.Author,
-                    m.Text,
-                    m.SentAt,
-                    m.Deadline,
-                    hasProg && prog!.IsCompleted,
-                    hasProg ? prog!.CompletedAt : null
-                );
-            })
-            .ToList();
-
-        return Ok(msgs);
-    }
-
-    [HttpPost("group/{groupId}/message")]
-    [TelegramAuthorize(RoleType.Admin, RoleType.Developer)] // Only Admins and Developers can publish homework
-    public async Task<IActionResult> PostMessage(
-        int groupId,
-        [FromBody] CreateMessageDto dto,
-        CancellationToken cancellationToken)
-    {
-        if (groupId <= 0) return BadRequest("Некорректный ID группы.");
-
-        var text = dto.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(text))
-            return BadRequest("Текст сообщения пуст");
-
-        if (text.Length > 4000)
-            return BadRequest("Текст сообщения слишком длинный (максимум 4000 символов)");
-
-        var group = await _db.ChatGroups.FindAsync(new object[] { groupId }, cancellationToken);
-        if (group == null) return NotFound("Группа не найдена");
-
-        // Identity is securely bound to the authenticated user from Telegram WebApp token
-        var msg = new Message
-        {
-            ChatGroupId = groupId,
-            FromUserId = CurrentUser.TelegramId,
-            Text = text,
-            SentAt = DateTime.UtcNow,
-            Deadline = dto.Deadline
-        };
-
-        _db.Messages.Add(msg);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        // Dispatch Telegram notifications to whitelisted students with automatic 7-hour self-destruction
-        var authorId = CurrentUser.TelegramId;
-        var subjectName = group.Name;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _notifications.NotifyStudentsAsync(
-                    msg.Id,
-                    subjectName,
-                    msg.Text,
-                    msg.Deadline,
-                    authorId
-                );
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Ошибка при рассылке уведомлений о ДЗ #{Id}", msg.Id);
-            }
-        });
-
-        return Ok(msg);
-    }
-
-    [HttpPost("message/{id}/toggle-complete")]
-    public async Task<IActionResult> ToggleComplete(int id, CancellationToken cancellationToken)
-    {
-        if (id <= 0) return BadRequest("Некорректный ID сообщения.");
-
-        var messageExists = await _db.Messages.AnyAsync(m => m.Id == id, cancellationToken);
-        if (!messageExists) return NotFound("Задание не найдено.");
-
-        var userId = CurrentUser.TelegramId;
-        var progress = await _db.UserTaskProgresses
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.MessageId == id, cancellationToken);
-
-        if (progress == null)
-        {
-            progress = new UserTaskProgress
-            {
-                UserId = userId,
-                MessageId = id,
-                IsCompleted = true,
-                CompletedAt = DateTime.UtcNow
-            };
-            _db.UserTaskProgresses.Add(progress);
-        }
-        else
-        {
-            progress.IsCompleted = !progress.IsCompleted;
-            progress.CompletedAt = progress.IsCompleted ? DateTime.UtcNow : null;
-        }
-
-        await _db.SaveChangesAsync(cancellationToken);
-
-        return Ok(new
-        {
-            messageId = id,
-            isCompleted = progress.IsCompleted,
-            completedAt = progress.CompletedAt
-        });
-    }
-
-    [HttpGet("my-deadlines")]
-    public async Task<IActionResult> GetMyDeadlines(CancellationToken cancellationToken)
-    {
-        var userId = CurrentUser.TelegramId;
-
-        var messages = await _db.Messages
-            .AsNoTracking()
-            .Include(m => m.Group)
-            .Where(m => m.Deadline != null)
-            .OrderBy(m => m.Deadline)
-            .ToListAsync(cancellationToken);
-
-        var msgIds = messages.Select(m => m.Id).ToList();
-        var progressMap = await _db.UserTaskProgresses
-            .AsNoTracking()
-            .Where(p => p.UserId == userId && msgIds.Contains(p.MessageId))
-            .ToDictionaryAsync(p => p.MessageId, p => new { p.IsCompleted, p.CompletedAt }, cancellationToken);
-
-        var result = messages.Select(m =>
-        {
-            var hasProg = progressMap.TryGetValue(m.Id, out var prog);
-            return new
-            {
-                m.Id,
-                ChatGroupId = m.ChatGroupId,
-                GroupName = m.Group?.Name ?? "Общее",
-                m.Text,
-                m.SentAt,
-                m.Deadline,
-                IsCompleted = hasProg && prog!.IsCompleted,
-                CompletedAt = hasProg ? prog!.CompletedAt : null
-            };
-        });
-
-        return Ok(result);
-    }
-
-    [HttpDelete("message/{id}")]
-    [TelegramAuthorize(RoleType.Admin, RoleType.Developer)] // Only Admins and Developers can delete homework
-    public async Task<IActionResult> DeleteMessage(int id, CancellationToken cancellationToken)
-    {
-        if (id <= 0) return BadRequest("Некорректный ID сообщения.");
-
-        var msg = await _db.Messages.FindAsync(new object[] { id }, cancellationToken);
-        if (msg == null) return NotFound();
-
-        _db.Messages.Remove(msg);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        // Immediately delete any pending 7-hour notifications from Telegram chats
-        await _notifications.DeleteNotificationsForHomeworkAsync(id, cancellationToken);
-
-        return NoContent();
     }
 }

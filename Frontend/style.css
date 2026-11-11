@@ -796,17 +796,104 @@ button { font-family: var(--font); }
   color: var(--text-muted);
 }
 
-.delete-msg-btn {
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.msg-action-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 0.85rem;
   cursor: pointer;
-  margin-left: 6px;
-  padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: 8px;
+  padding: 0;
 }
+.msg-action-btn .ico { width: 14px; height: 14px; stroke-width: 2.2; }
+.msg-action-btn:active { background: var(--field-bg); }
+.edit-msg-btn:hover { color: var(--text-primary); }
 .delete-msg-btn:hover { color: var(--danger); }
+
+/* ---------- Attachments inside a task card ---------- */
+.message-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attach-grid {
+  display: grid;
+  gap: 4px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.attach-grid.count-1 { grid-template-columns: 1fr; }
+.attach-grid.count-2 { grid-template-columns: 1fr 1fr; }
+.attach-grid.count-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+.attach-photo {
+  display: block;
+  padding: 0;
+  border: none;
+  background: var(--field-bg);
+  cursor: zoom-in;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+.attach-grid.count-1 .attach-photo { aspect-ratio: 4 / 3; max-height: 260px; }
+.attach-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attach-doc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.attach-doc:active { transform: scale(0.99); }
+
+.attach-doc-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--tile-bg);
+  box-shadow: var(--tile-shadow);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.attach-doc-icon .ico { width: 16px; height: 16px; }
+
+.attach-doc-info { display: flex; flex-direction: column; min-width: 0; }
+.attach-doc-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attach-doc-size { font-size: 0.7rem; color: var(--text-secondary); }
 
 .message-text {
   font-size: 0.9rem;
@@ -969,8 +1056,107 @@ button { font-family: var(--font); }
 
 .chat-input-bar {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-end;
+}
+
+/* ---------- Composer: attach button, file chips, edit mode ---------- */
+.attach-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+.attach-btn .ico { width: 19px; height: 19px; stroke-width: 2; }
+.attach-btn:active { background: var(--field-bg); }
+
+.composer-files {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 2px;
+}
+.composer-files::-webkit-scrollbar { display: none; }
+
+.composer-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 170px;
+  flex-shrink: 0;
+  padding: 4px 4px 4px 4px;
+  border-radius: 12px;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+}
+.composer-chip img,
+.composer-chip-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.composer-chip-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tile-bg);
+  color: #fff;
+}
+.composer-chip-icon .ico { width: 15px; height: 15px; }
+.composer-chip-name {
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.composer-chip-remove {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.composer-chip-remove .ico { width: 13px; height: 13px; stroke-width: 2.4; }
+
+.edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.edit-banner .ico { width: 14px; height: 14px; }
+.edit-banner span { flex: 1; }
+.edit-cancel-btn {
+  border: none;
+  background: var(--field-bg);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
 }
 
 .chat-input-bar textarea {
@@ -1007,6 +1193,69 @@ button { font-family: var(--font); }
 .send-btn .ico { width: 17px; height: 17px; stroke-width: 2.4; }
 .send-btn:active { transform: scale(0.92); }
 .send-btn:disabled { opacity: 0.5; }
+.send-btn.loading .ico { animation: spin 0.9s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Fullscreen photo viewer ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0,0,0,0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in 0.18s ease;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.lightbox-close {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Pull to refresh ---------- */
+.pull-indicator {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  z-index: 150;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-solid);
+  border: 1px solid var(--surface-border);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  color: var(--text-secondary);
+  opacity: 0;
+  transform: translate(-50%, -48px);
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.pull-indicator .ico { width: 18px; height: 18px; stroke-width: 2.2; }
+.pull-indicator.ready { color: var(--text-primary); }
+.pull-indicator.spinning .ico { animation: spin 0.8s linear infinite; }
 
 /* ============================================
    SETTINGS SCREEN

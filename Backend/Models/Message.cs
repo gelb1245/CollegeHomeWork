@@ -27,5 +27,12 @@ namespace TelegramBotApi.Models
         /// Optional deadline for homework submission.
         /// </summary>
         public DateTime? Deadline { get; set; }
+
+        /// <summary>
+        /// When the homework was last edited (null if never).
+        /// </summary>
+        public DateTime? EditedAt { get; set; }
+
+        public List<Attachment> Attachments { get; set; } = new();
     }
 }

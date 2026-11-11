@@ -120,6 +120,12 @@
 
         <!-- Admin post bar -->
         <div id="adminPostArea" class="chat-input-bar-wrapper hidden">
+          <!-- Shown while editing an existing task -->
+          <div id="editBanner" class="edit-banner hidden">
+            <svg class="ico" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            <span>Редактирование задания</span>
+            <button type="button" id="cancelEditBtn" class="edit-cancel-btn">Отмена</button>
+          </div>
           <div class="deadline-toggle-bar">
             <button type="button" id="toggleDeadlineBtn" class="pill-btn">Дедлайн: <span id="deadlinePreview">Без срока</span></button>
             <div id="deadlineContainer" class="deadline-picker-container hidden">
@@ -132,7 +138,13 @@
               </div>
             </div>
           </div>
+          <!-- Selected files (photos, PDF) -->
+          <div id="composerFiles" class="composer-files hidden"></div>
           <div class="chat-input-bar">
+            <button type="button" id="attachBtn" class="attach-btn" title="Прикрепить фото или PDF">
+              <svg class="ico" viewBox="0 0 24 24"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+            </button>
+            <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" multiple hidden />
             <textarea id="adminMessageInput" placeholder="Новое задание…" rows="1"></textarea>
             <button id="sendMessageBtn" class="send-btn" title="Опубликовать ДЗ"><svg class="ico" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button>
           </div>
@@ -279,6 +291,12 @@
         <button id="saveUserBtn" class="btn primary-btn">Сохранить</button>
       </div>
     </div>
+  </div>
+
+  <!-- Fullscreen photo viewer -->
+  <div id="lightbox" class="lightbox hidden">
+    <img id="lightboxImg" alt="" />
+    <button type="button" id="lightboxClose" class="lightbox-close" title="Закрыть">&times;</button>
   </div>
 
   <script src="app.js" defer></script>

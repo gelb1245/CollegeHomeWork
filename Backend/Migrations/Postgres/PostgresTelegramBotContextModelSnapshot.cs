@@ -22,6 +22,45 @@ namespace collegehomework.Migrations.Postgres
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("TelegramBotApi.Models.Attachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TelegramFileId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.ToTable("Attachments");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.ChatGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -54,6 +93,9 @@ namespace collegehomework.Migrations.Postgres
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("Deadline")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("EditedAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<long>("FromUserId")
@@ -163,6 +205,17 @@ namespace collegehomework.Migrations.Postgres
                     b.ToTable("UserTaskProgresses");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.Attachment", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.Message", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
                 {
                     b.HasOne("TelegramBotApi.Models.ChatGroup", "Group")
@@ -199,6 +252,11 @@ namespace collegehomework.Migrations.Postgres
                     b.Navigation("Message");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
+                {
+                    b.Navigation("Attachments");
                 });
 #pragma warning restore 612, 618
         }

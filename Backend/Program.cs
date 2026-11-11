@@ -8,6 +8,7 @@ using Microsoft.Extensions.FileProviders;
 using Telegram.Bot;
 using TelegramBotApi.Data;
 using TelegramBotApi.Services;
+using TelegramBotApi.Services.Bot;
 
 // Development only: pick up DATABASE_URL etc. from .env.local (written by `neon init`)
 TelegramBotApi.LocalEnvFile.LoadForDevelopment();
@@ -109,16 +110,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// 6. CORS Policy
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .WithMethods("GET", "POST", "PATCH", "DELETE", "OPTIONS");
-    });
-});
+// 6. No CORS: the Mini App is served from the same origin as the API,
+// so cross-site requests from other websites are not allowed at all.
 
 // 7. Security & Business Services
 builder.Services.AddSingleton<TelegramRateLimiter>();
@@ -137,16 +130,30 @@ if (string.IsNullOrWhiteSpace(botToken) || botToken == "YOUR_BOT_TOKEN_HERE")
 builder.Services.AddSingleton<TelegramAuthService>(sp =>
     new TelegramAuthService(botToken, sp.GetRequiredService<ILogger<TelegramAuthService>>()));
 builder.Services.AddSingleton<HomeworkNotificationService>();
+builder.Services.AddSingleton<AttachmentStorage>();
+builder.Services.AddSingleton(new AttachmentUrlSigner(botToken));
 
 // 8. Configure Telegram Bot Client
-builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(botToken));
+// TELEGRAM_API_URL: optional custom Bot API server (self-hosted Local Bot API Server
+// lifts the 20 MB file download limit; also used for local testing without real Telegram)
+var telegramApiUrl = Environment.GetEnvironmentVariable("TELEGRAM_API_URL");
+builder.Services.AddSingleton<ITelegramBotClient>(_ => string.IsNullOrWhiteSpace(telegramApiUrl)
+    ? new TelegramBotClient(botToken)
+    : new TelegramBotClient(new TelegramBotClientOptions(botToken, telegramApiUrl)));
 
-// Register Background Services (Telegram Polling & 24-hour Notification Auto-Deleter)
-builder.Services.AddHostedService<TelegramBotPollingService>();
+// Telegram bot: one handler for both polling and webhook; mode is BOT_UPDATES_MODE (polling | webhook | off)
+builder.Services.AddSingleton<BotAccessManager>();
+builder.Services.AddSingleton<BotUpdateHandler>();
+builder.Services.AddHostedService<BotUpdatesService>();
+
+// Background services: 24-hour notification auto-deleter, keep-alive
+
 builder.Services.AddHostedService<NotificationCleanupService>();
 builder.Services.AddHostedService<KeepAliveService>();
 
 var app = builder.Build();
+
+LocalTime.Configure(app.Configuration, app.Services.GetRequiredService<ILogger<Program>>());
 
 // Enable Forwarded Headers (MUST be early in pipeline)
 app.UseForwardedHeaders();
@@ -199,7 +206,6 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Ena
     });
 }
 
-app.UseCors();
 
 // Serve static frontend files (HTML, CSS, JS) safely
 var possiblePaths = new[]

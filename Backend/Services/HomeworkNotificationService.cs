@@ -46,20 +46,13 @@ public class HomeworkNotificationService
         string taskText,
         DateTime? deadline,
         long authorTelegramId,
+        int attachmentCount = 0,
         CancellationToken cancellationToken = default)
     {
         var targetUsers = _whitelist.GetAll();
         if (targetUsers.Count == 0) return;
 
-        var webAppUrl = _config["Telegram:WebAppUrl"];
-        InlineKeyboardMarkup? replyMarkup = null;
-        if (IsValidTelegramWebAppUrl(webAppUrl))
-        {
-            replyMarkup = new InlineKeyboardMarkup(new[]
-            {
-                InlineKeyboardButton.WithWebApp("📱 Открыть задание в Mini App", new WebAppInfo { Url = webAppUrl! })
-            });
-        }
+        var replyMarkup = Bot.MiniAppLink.Button(_config, "📱 Открыть задание в Mini App");
 
         var sb = new StringBuilder();
         sb.AppendLine("🔔 *Новое домашнее задание!*");
@@ -68,7 +61,7 @@ public class HomeworkNotificationService
         if (deadline.HasValue)
         {
             var dl = deadline.Value;
-            var dlFormatted = dl.ToString("dd.MM.yyyy HH:mm");
+            var dlFormatted = LocalTime.FromUtc(dl).ToString("dd.MM.yyyy HH:mm");
             var diff = dl - DateTime.UtcNow;
             string urgency = diff.TotalHours < 24 ? "⚠️ Меньше 24ч!" : $"осталось {(int)diff.TotalDays} дн.";
             sb.AppendLine($"⏳ Срок сдачи (дедлайн): `{dlFormatted}` ({urgency})\n");
@@ -79,6 +72,11 @@ public class HomeworkNotificationService
         var previewText = taskText.Length > 800 ? taskText[..800] + "..." : taskText;
         sb.AppendLine(EscapeMarkdown(previewText));
         sb.AppendLine();
+        if (attachmentCount > 0)
+        {
+            sb.AppendLine($"📎 Файлов: {attachmentCount}. Откройте задание в Mini App.");
+            sb.AppendLine();
+        }
         sb.AppendLine("⏰ _Это сообщение автоматически удалится через 24 часа._");
 
         var text = sb.ToString();
@@ -162,23 +160,5 @@ public class HomeworkNotificationService
         _logger.LogInformation("Удалено {Count} уведомлений для удаленного ДЗ #{HomeworkId}", notifications.Count, homeworkMessageId);
     }
 
-    private static bool IsValidTelegramWebAppUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false;
-        if (url.Contains("localhost", StringComparison.OrdinalIgnoreCase)) return false;
-        if (url.Contains("127.0.0.1")) return false;
-        return true;
-    }
-
-    private static string EscapeMarkdown(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return string.Empty;
-        return text
-            .Replace("_", "\\_")
-            .Replace("*", "\\*")
-            .Replace("[", "\\[")
-            .Replace("]", "\\]")
-            .Replace("`", "\\`");
-    }
+    private static string EscapeMarkdown(string text) => Bot.BotText.EscapeMarkdown(text);
 }
