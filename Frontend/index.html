@@ -87,6 +87,15 @@
         </div>
       </section>
 
+      <!-- SCREEN: My deadlines (all subjects) -->
+      <section id="deadlinesScreen" class="screen">
+        <div class="deadline-filter-tabs">
+          <button class="deadline-filter-tab active" data-deadline-filter="active">Активные <span id="countActiveDeadlines" class="tab-count"></span></button>
+          <button class="deadline-filter-tab" data-deadline-filter="done">Сданные <span id="countDoneDeadlines" class="tab-count"></span></button>
+        </div>
+        <div id="deadlinesList" class="deadlines-list"></div>
+      </section>
+
       <!-- SCREEN 2: Chat / Messages -->
       <section id="chatScreen" class="screen">
         <div class="chat-header-banner">
@@ -242,6 +251,14 @@
           <path d="M12 3v18"/>
         </svg>
         <span class="nav-label">Предметы</span>
+      </button>
+      <button class="nav-item" id="navDeadlinesTab" data-screen="deadlinesScreen">
+        <svg class="nav-svg" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="18" rx="3"/>
+          <path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
+          <path d="m9 15 2 2 4-4"/>
+        </svg>
+        <span class="nav-label">Дедлайны</span>
       </button>
       <button class="nav-item" id="navUsersTab" data-screen="usersScreen">
         <svg class="nav-svg" viewBox="0 0 24 24">

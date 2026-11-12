@@ -384,6 +384,9 @@ function switchScreen(screenId) {
   if (screenId === "groupsScreen") {
     headerTitle.textContent = "Предметы";
     loadGroups();
+  } else if (screenId === "deadlinesScreen") {
+    headerTitle.textContent = "Дедлайны";
+    loadDeadlinesScreen();
   } else if (screenId === "usersScreen") {
     headerTitle.textContent = "Вайтлист";
     loadUsers();
@@ -397,8 +400,11 @@ function switchScreen(screenId) {
   requestAnimationFrame(() => refreshIndicators(true));
 }
 
+// Where "Back" from a subject leads: the subjects list or the deadlines screen it was opened from
+let chatReturnScreen = "groupsScreen";
+
 backBtn.addEventListener("click", () => {
-  switchScreen("groupsScreen");
+  switchScreen(chatReturnScreen);
 });
 
 // ============================================================
@@ -555,7 +561,12 @@ groupSearchInput.addEventListener("input", () => renderGroupsList(cachedGroups))
 // ============================================================
 // CHAT / MESSAGES
 // ============================================================
-async function openChat(groupId, name, desc) {
+/**
+ * Opens a subject. options.returnTo — screen for the Back button,
+ * options.highlightId — task to scroll to and highlight.
+ */
+async function openChat(groupId, name, desc, options = {}) {
+  chatReturnScreen = options.returnTo || "groupsScreen";
   currentGroupId = groupId;
   currentGroupName = name;
   currentTaskFilter = "all";
@@ -579,7 +590,7 @@ async function openChat(groupId, name, desc) {
   updateTelegramBackButton();
   // Animated refresh: running slides continue, indicators that were hidden snap into place
   requestAnimationFrame(() => refreshIndicators(true));
-  await loadMessages(groupId);
+  await loadMessages(groupId, false, options.highlightId ? { flash: [options.highlightId] } : {});
 }
 
 // Deadline Picker
@@ -1348,6 +1359,207 @@ function escapeHtml(str) {
 }
 
 // ============================================================
+// MY DEADLINES SCREEN — tasks with a deadline from all subjects
+// ============================================================
+const deadlinesScreen = document.getElementById("deadlinesScreen");
+const deadlinesList = document.getElementById("deadlinesList");
+const deadlineFilterTabs = document.querySelectorAll(".deadline-filter-tab");
+const countActiveDeadlines = document.getElementById("countActiveDeadlines");
+const countDoneDeadlines = document.getElementById("countDoneDeadlines");
+
+let cachedDeadlines = [];
+let currentDeadlineFilter = "active"; // "active" | "done"
+
+deadlineFilterTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    deadlineFilterTabs.forEach((t) => t.classList.toggle("active", t === tab));
+    currentDeadlineFilter = tab.dataset.deadlineFilter;
+    renderDeadlines();
+  });
+});
+
+// The summary banner on the subjects screen opens the full list
+deadlinesSummaryCard?.addEventListener("click", () => switchScreen("deadlinesScreen"));
+
+async function loadDeadlinesScreen(silent = false) {
+  if (!silent || cachedDeadlines.length === 0) deadlinesList.innerHTML = skeleton("deadline", 4);
+  try {
+    const res = await apiFetch("/admin/my-deadlines");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    cachedDeadlines = await res.json();
+    renderDeadlines();
+  } catch (err) {
+    console.error(err);
+    deadlinesList.innerHTML = '<div class="empty-state">Не удалось загрузить дедлайны. Потяните вниз, чтобы повторить.</div>';
+  }
+}
+
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Section of an active task: overdue, today, tomorrow, this week, later. */
+function deadlineBucket(deadline, now) {
+  if (deadline < now) return "overdue";
+  const days = Math.round((startOfDay(deadline) - startOfDay(now)) / DAY_MS);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days < 7) return "week";
+  return "later";
+}
+
+const BUCKET_TITLES = {
+  overdue: "Просрочено",
+  today: "Сегодня",
+  tomorrow: "Завтра",
+  week: "На этой неделе",
+  later: "Позже",
+  done: "Сданные"
+};
+
+/** Markdown → short plain text for the list preview. */
+function plainPreview(text) {
+  return (text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#>~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderDeadlines() {
+  const now = new Date();
+  const active = cachedDeadlines.filter((d) => !d.isCompleted);
+  const done = cachedDeadlines.filter((d) => d.isCompleted);
+  countActiveDeadlines.textContent = active.length || "";
+  countDoneDeadlines.textContent = done.length || "";
+
+  const items = currentDeadlineFilter === "done"
+    ? done.slice().sort((a, b) => new Date(b.deadline) - new Date(a.deadline))
+    : active;
+
+  if (items.length === 0) {
+    deadlinesList.innerHTML = currentDeadlineFilter === "done"
+      ? '<div class="empty-state fade-in">Пока нет сданных заданий с дедлайном.</div>'
+      : `<div class="deadlines-empty fade-in">
+           <div class="deadlines-empty-icon">${icon("checkMark")}</div>
+           <div class="deadlines-empty-title">Всё сдано</div>
+           <div class="deadlines-empty-text">Активных дедлайнов нет. Новые появятся здесь автоматически.</div>
+         </div>`;
+    return;
+  }
+
+  // Group into sections, keeping the API order (sorted by deadline)
+  const sections = new Map();
+  items.forEach((d) => {
+    const key = currentDeadlineFilter === "done" ? "done" : deadlineBucket(new Date(d.deadline), now);
+    if (!sections.has(key)) sections.set(key, []);
+    sections.get(key).push(d);
+  });
+
+  deadlinesList.innerHTML = "";
+  ["overdue", "today", "tomorrow", "week", "later", "done"].forEach((key) => {
+    const group = sections.get(key);
+    if (!group) return;
+    const section = document.createElement("section");
+    section.className = `deadline-section ${key}`;
+    section.innerHTML = `
+      <div class="deadline-section-title"><span>${BUCKET_TITLES[key]}</span><span>${group.length}</span></div>
+      <div class="deadline-section-items"></div>`;
+    const box = section.querySelector(".deadline-section-items");
+    group.forEach((d) => box.appendChild(createDeadlineItem(d, now)));
+    deadlinesList.appendChild(section);
+  });
+}
+
+function deadlineTimeLabels(deadline, now, isCompleted) {
+  const sameDayOrNext = ["today", "tomorrow"].includes(deadlineBucket(deadline, now)) && deadline >= now;
+  const main = sameDayOrNext
+    ? deadline.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+    : deadline.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+
+  if (isCompleted) return { main, sub: "сдано", tone: "done" };
+  const hours = (deadline - now) / (60 * 60 * 1000);
+  if (hours < 0) {
+    const daysLate = Math.floor(-hours / 24);
+    return { main, sub: daysLate >= 1 ? `${daysLate} дн назад` : "просрочено", tone: "overdue" };
+  }
+  if (hours < 24) return { main, sub: `через ${Math.max(1, Math.round(hours))} ч`, tone: "urgent" };
+  // Count calendar days, not 24-hour periods: "tomorrow 23:00" is "завтра", not "через 2 дн"
+  const days = Math.round((startOfDay(deadline) - startOfDay(now)) / DAY_MS);
+  return { main, sub: days === 1 ? "завтра" : `через ${days} дн`, tone: "normal" };
+}
+
+function createDeadlineItem(d, now) {
+  const deadline = new Date(d.deadline);
+  const time = deadlineTimeLabels(deadline, now, d.isCompleted);
+
+  const item = document.createElement("div");
+  item.className = `deadline-item ${d.isCompleted ? "completed" : ""}`;
+  item.dataset.id = d.id;
+  item.innerHTML = `
+    <button type="button" class="deadline-check ${d.isCompleted ? "checked" : ""}" title="${d.isCompleted ? "Отменить «Сдано»" : "Отметить сданным"}">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+    </button>
+    <div class="deadline-item-body">
+      <div class="deadline-item-subject">${getSubjectIcon(d.groupName)}<span>${escapeHtml(d.groupName)}</span></div>
+      <div class="deadline-item-text">${escapeHtml(plainPreview(d.text)) || "Без описания"}</div>
+    </div>
+    <div class="deadline-item-time ${time.tone}">
+      <span class="deadline-item-main">${time.main}</span>
+      <span class="deadline-item-sub">${time.sub}</span>
+    </div>`;
+
+  item.querySelector(".deadline-check").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleDeadlineItem(d, item);
+  });
+  item.addEventListener("click", () => {
+    const group = cachedGroups.find((g) => g.id === d.chatGroupId);
+    openChat(d.chatGroupId, d.groupName, group?.description, { returnTo: "deadlinesScreen", highlightId: d.id });
+  });
+  return item;
+}
+
+async function toggleDeadlineItem(d, item) {
+  const haptic = window.Telegram?.WebApp?.HapticFeedback;
+  haptic?.impactOccurred("medium");
+  const check = item.querySelector(".deadline-check");
+  check.disabled = true;
+  try {
+    const res = await apiFetch(`/admin/message/${d.id}/toggle-complete`, { method: "POST" });
+    if (!res.ok) {
+      await handleResponseError(res, "Не удалось изменить отметку");
+      return;
+    }
+    const data = await res.json();
+    d.isCompleted = data.isCompleted;
+    d.completedAt = data.completedAt;
+    if (d.isCompleted) haptic?.notificationOccurred("success");
+
+    // Show the check first, then fold the item away from the current tab
+    check.classList.toggle("checked", d.isCompleted);
+    item.classList.toggle("completed", d.isCompleted);
+    await new Promise((r) => setTimeout(r, prefersReducedMotion() ? 0 : 280));
+
+    const section = item.closest(".deadline-section");
+    await collapseAndRemove(item);
+    if (section && !section.querySelector(".deadline-item")) await collapseAndRemove(section);
+    else if (section) section.querySelector(".deadline-section-title span:last-child").textContent =
+      section.querySelectorAll(".deadline-item").length;
+
+    const active = cachedDeadlines.filter((x) => !x.isCompleted).length;
+    countActiveDeadlines.textContent = active || "";
+    countDoneDeadlines.textContent = (cachedDeadlines.length - active) || "";
+    if (!deadlinesList.querySelector(".deadline-item")) renderDeadlines();
+    loadDeadlinesSummary();
+  } catch (err) {
+    console.error(err);
+  } finally {
+    check.disabled = false;
+  }
+}
+
+// ============================================================
 // SKELETON PLACEHOLDERS (instead of "Загрузка…")
 // ============================================================
 function skeleton(kind, count) {
@@ -1360,6 +1572,11 @@ function skeleton(kind, count) {
               <div class="skel skel-line sm w30"></div>
               <div class="skel skel-line w90"></div><div class="skel skel-line w65"></div>
               <div class="skel skel-pill"></div>
+            </div>`,
+    deadline: `<div class="deadline-item skeleton-item" aria-hidden="true">
+              <div class="deadline-check skel"></div>
+              <div class="deadline-item-body"><div class="skel skel-line sm w30"></div><div class="skel skel-line w80"></div></div>
+              <div class="skel skel-line w30" style="width:44px"></div>
             </div>`,
     user: `<div class="user-card skeleton-item" aria-hidden="true">
               <div class="user-avatar skel"></div>
@@ -1414,6 +1631,7 @@ function refreshIndicators(animate = false) {
 
 setupSlidingIndicator(document.querySelector(".groups-filter-tabs"), ".groups-filter-tab");
 setupSlidingIndicator(document.querySelector(".chat-filter-tabs"), ".chat-filter-tab");
+setupSlidingIndicator(document.querySelector(".deadline-filter-tabs"), ".deadline-filter-tab");
 setupSlidingIndicator(document.querySelector(".theme-toggle-group"), ".theme-btn");
 setupSlidingIndicator(document.querySelector(".bottom-nav"), ".nav-item");
 window.addEventListener("resize", () => refreshIndicators(false));
@@ -1435,7 +1653,7 @@ function currentBackAction() {
     resetComposer();
     updateTelegramBackButton();
   };
-  if (chatScreen.classList.contains("active")) return () => switchScreen("groupsScreen");
+  if (chatScreen.classList.contains("active")) return () => switchScreen(chatReturnScreen);
   return null;
 }
 
@@ -1480,6 +1698,7 @@ function refreshCurrentScreen() {
   }
   if (usersScreen.classList.contains("active")) return loadUsers();
   if (groupsScreen.classList.contains("active")) return loadGroups();
+  if (deadlinesScreen.classList.contains("active")) return loadDeadlinesScreen(true);
   return null;
 }
 
