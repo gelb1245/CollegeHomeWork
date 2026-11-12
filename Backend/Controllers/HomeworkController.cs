@@ -179,7 +179,7 @@ public class HomeworkController : ControllerBase
         {
             try
             {
-                await _notifications.NotifyStudentsAsync(msg.Id, group.Name, msg.Text, msg.Deadline, authorId, attachmentCount);
+                await _notifications.NotifyStudentsAsync(msg.Id, group.Id, group.Name, msg.Text, msg.Deadline, authorId, attachmentCount);
             }
             catch (Exception ex)
             {

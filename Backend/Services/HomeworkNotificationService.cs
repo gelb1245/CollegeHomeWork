@@ -22,6 +22,9 @@ public class HomeworkNotificationService
 
     public static readonly TimeSpan SelfDestructDelay = TimeSpan.FromHours(24);
 
+    /// <summary>"Delete never" for users who turned auto-delete off (still deleted together with the task).</summary>
+    public static readonly DateTime KeepForever = new(9999, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     public HomeworkNotificationService(
         ITelegramBotClient botClient,
         IServiceScopeFactory scopeFactory,
@@ -37,11 +40,13 @@ public class HomeworkNotificationService
     }
 
     /// <summary>
-    /// Sends a Telegram message to all whitelisted students about newly published homework.
+    /// Sends a Telegram message to all whitelisted students about newly published homework,
+    /// respecting each user's notification settings (off, muted subject, quiet hours, auto-delete).
     /// Stores the sent message ID to delete it after 24 hours.
     /// </summary>
     public async Task NotifyStudentsAsync(
         int homeworkMessageId,
+        int subjectId,
         string subjectName,
         string taskText,
         DateTime? deadline,
@@ -77,42 +82,67 @@ public class HomeworkNotificationService
             sb.AppendLine($"📎 Файлов: {attachmentCount}. Откройте задание в Mini App.");
             sb.AppendLine();
         }
-        sb.AppendLine("⏰ _Это сообщение автоматически удалится через 24 часа._");
-
-        var text = sb.ToString();
+        var baseText = sb.ToString();
+        const string autoDeleteNote = "⏰ _Это сообщение автоматически удалится через 24 часа._";
         var deleteAt = DateTime.UtcNow.Add(SelfDestructDelay);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TelegramBotContext>();
 
-        int sentCount = 0;
+        // Everyone's settings in two queries instead of one per user
+        var settingsByUser = await db.NotificationSettings.AsNoTracking()
+            .Where(s => targetUsers.Contains(s.UserId))
+            .ToDictionaryAsync(s => s.UserId, cancellationToken);
+        var mutedUsers = (await db.MutedSubjects.AsNoTracking()
+                .Where(m => m.ChatGroupId == subjectId)
+                .Select(m => m.UserId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var mutedThisSubject = new HashSet<int> { subjectId };
+        var localTime = LocalTime.NowTimeOfDay();
+
+        int sentCount = 0, skipped = 0;
 
         foreach (var userId in targetUsers)
         {
-            // Optional: skip notifying author if they posted it
+            // The author does not need a notification about their own task
             if (userId == authorTelegramId) continue;
+
+            settingsByUser.TryGetValue(userId, out var settings);
+            var muted = mutedUsers.Contains(userId) ? mutedThisSubject : (IReadOnlySet<int>)new HashSet<int>();
+            if (!NotificationPolicy.ShouldNotify(settings, muted, subjectId))
+            {
+                skipped++;
+                continue;
+            }
+
+            var autoDelete = NotificationPolicy.ShouldAutoDelete(settings);
 
             try
             {
                 var sentMsg = await _botClient.SendMessage(
                     chatId: userId,
-                    text: text,
+                    text: autoDelete ? baseText + autoDeleteNote : baseText,
                     replyMarkup: replyMarkup,
                     parseMode: ParseMode.Markdown,
+                    // Quiet hours: the message arrives without sound
+                    disableNotification: NotificationPolicy.IsQuietTime(settings, localTime),
                     cancellationToken: cancellationToken
                 );
 
+                sentCount++;
+
+                // Always remembered, so the notification disappears if the task itself is deleted.
+                // Users who keep notifications get a "never" date for the 24-hour cleanup.
                 db.SentNotifications.Add(new SentNotification
                 {
                     TelegramChatId = userId,
                     TelegramMessageId = sentMsg.Id,
                     HomeworkMessageId = homeworkMessageId,
                     SentAt = DateTime.UtcNow,
-                    DeleteAt = deleteAt,
+                    DeleteAt = autoDelete ? deleteAt : KeepForever,
                     IsDeleted = false
                 });
-
-                sentCount++;
 
                 // Throttling to respect Telegram API rate limits (max ~30 msgs/sec broadcast)
                 await Task.Delay(50, cancellationToken);
@@ -122,6 +152,9 @@ public class HomeworkNotificationService
                 _logger.LogDebug(ex, "Не удалось отправить уведомление пользователю {UserId} (возможно, бот не был запущен)", userId);
             }
         }
+
+        if (skipped > 0)
+            _logger.LogInformation("ДЗ #{HomeworkId}: {Skipped} пользователей отключили эти уведомления", homeworkMessageId, skipped);
 
         if (sentCount > 0)
         {

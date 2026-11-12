@@ -23,6 +23,9 @@ public static class LocalTime
         }
     }
 
+    /// <summary>Current time of day in the college time zone.</summary>
+    public static TimeOnly NowTimeOfDay() => TimeOnly.FromDateTime(FromUtc(DateTime.UtcNow));
+
     public static DateTime FromUtc(DateTime utc) =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _zone);
 }

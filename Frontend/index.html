@@ -225,6 +225,51 @@
             </div>
           </div>
 
+          <!-- Notifications -->
+          <div id="notificationsSection">
+            <div class="settings-section-label">Уведомления</div>
+            <div class="settings-group">
+              <label class="settings-row switch-row">
+                <span class="settings-row-icon"><svg class="ico" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+                <div class="settings-row-text">
+                  <div class="settings-row-title">Новые задания</div>
+                  <div class="settings-row-sub">Бот пишет, когда появляется задание</div>
+                </div>
+                <input type="checkbox" class="switch" id="notifNewTasks" />
+              </label>
+              <div id="notifDetails">
+                <label class="settings-row switch-row">
+                  <span class="settings-row-icon"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Удалять через 24 часа</div>
+                    <div class="settings-row-sub">Чтобы не засорять чат</div>
+                  </div>
+                  <input type="checkbox" class="switch" id="notifAutoDelete" />
+                </label>
+                <label class="settings-row switch-row">
+                  <span class="settings-row-icon"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></span>
+                  <div class="settings-row-text">
+                    <div class="settings-row-title">Тихие часы</div>
+                    <div class="settings-row-sub">Приходят без звука</div>
+                  </div>
+                  <input type="checkbox" class="switch" id="notifQuiet" />
+                </label>
+                <div id="quietTimes" class="settings-row quiet-times hidden">
+                  <span>с</span><input type="time" id="quietFrom" class="time-input" />
+                  <span>до</span><input type="time" id="quietTo" class="time-input" />
+                </div>
+              </div>
+            </div>
+
+            <div id="notifSubjectsBlock">
+              <div class="settings-section-label notif-subjects-label">Предметы в уведомлениях</div>
+              <div id="notifSubjects" class="settings-group"></div>
+            </div>
+
+            <button type="button" id="notifTestBtn" class="btn secondary-btn notif-test-btn">Отправить тестовое уведомление</button>
+            <div id="notifStatus" class="notif-status" aria-live="polite"></div>
+          </div>
+
           <!-- Subjects management (Developer only) -->
           <div id="createGroupSection" class="hidden">
             <div class="settings-section-label">Управление предметами</div>

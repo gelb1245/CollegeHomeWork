@@ -106,6 +106,46 @@ namespace collegehomework.Migrations
                     b.ToTable("Messages");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.MutedSubject", b =>
+                {
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChatGroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId", "ChatGroupId");
+
+                    b.HasIndex("ChatGroupId");
+
+                    b.ToTable("MutedSubjects");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.NotificationSettings", b =>
+                {
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoDelete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("NewTasks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("QuietFromMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("QuietHoursEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("QuietToMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("NotificationSettings");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.SentNotification", b =>
                 {
                     b.Property<int>("Id")
@@ -219,6 +259,36 @@ namespace collegehomework.Migrations
                     b.Navigation("FromUser");
 
                     b.Navigation("Group");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.MutedSubject", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.ChatGroup", "Group")
+                        .WithMany()
+                        .HasForeignKey("ChatGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TelegramBotApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Group");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.NotificationSettings", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("TelegramBotApi.Models.UserTaskProgress", b =>

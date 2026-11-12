@@ -393,6 +393,7 @@ function switchScreen(screenId) {
     if (currentUsersTab === "stats") loadStats(); else loadUsers();
   } else if (screenId === "settingsScreen") {
     headerTitle.textContent = "Настройки";
+    loadNotificationSettings();
   }
 
   syncRoleUI();
@@ -1794,6 +1795,128 @@ async function openStudentSheet(telegramId) {
     openSheet("Ошибка", "", '<div class="sheet-empty">Не удалось загрузить данные.</div>');
   }
 }
+
+// ============================================================
+// NOTIFICATION SETTINGS (Настройки → Уведомления)
+// ============================================================
+const notif = {
+  newTasks: document.getElementById("notifNewTasks"),
+  autoDelete: document.getElementById("notifAutoDelete"),
+  quiet: document.getElementById("notifQuiet"),
+  quietFrom: document.getElementById("quietFrom"),
+  quietTo: document.getElementById("quietTo"),
+  quietTimes: document.getElementById("quietTimes"),
+  details: document.getElementById("notifDetails"),
+  subjectsBlock: document.getElementById("notifSubjectsBlock"),
+  subjects: document.getElementById("notifSubjects"),
+  testBtn: document.getElementById("notifTestBtn"),
+  status: document.getElementById("notifStatus")
+};
+let notifSaveTimer = null;
+let notifStatusTimer = null;
+
+function showNotifStatus(text, tone = "ok", sticky = false) {
+  clearTimeout(notifStatusTimer);
+  notif.status.textContent = text;
+  notif.status.className = `notif-status visible ${tone}`;
+  if (!sticky) notifStatusTimer = setTimeout(() => notif.status.classList.remove("visible"), 2200);
+}
+
+/** Dependent controls are dimmed when "Новые задания" is off */
+function syncNotifUI() {
+  const on = notif.newTasks.checked;
+  notif.details.classList.toggle("disabled", !on);
+  notif.subjectsBlock.classList.toggle("disabled", !on);
+  notif.quietTimes.classList.toggle("hidden", !notif.quiet.checked);
+}
+
+async function loadNotificationSettings() {
+  try {
+    const res = await apiFetch("/admin/notification-settings");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderNotificationSettings(await res.json());
+  } catch (err) {
+    console.error(err);
+    showNotifStatus("Не удалось загрузить настройки уведомлений", "bad", true);
+  }
+}
+
+function renderNotificationSettings(data) {
+  notif.newTasks.checked = data.newTasks;
+  notif.autoDelete.checked = data.autoDelete;
+  notif.quiet.checked = data.quietHoursEnabled;
+  notif.quietFrom.value = data.quietFrom;
+  notif.quietTo.value = data.quietTo;
+
+  notif.subjects.innerHTML = data.subjects.length === 0
+    ? '<div class="settings-row"><div class="settings-row-sub">Предметов пока нет</div></div>'
+    : data.subjects.map((sub) => `
+      <label class="settings-row switch-row subject-switch-row">
+        <span class="subject-mini-icon">${getSubjectIcon(sub.name)}</span>
+        <div class="settings-row-text"><div class="settings-row-title">${escapeHtml(sub.name)}</div></div>
+        <input type="checkbox" class="switch" data-subject-id="${sub.id}" ${sub.muted ? "" : "checked"} />
+      </label>`).join("");
+  notif.subjects.querySelectorAll("input[data-subject-id]").forEach((input) =>
+    input.addEventListener("change", onNotifChanged));
+  syncNotifUI();
+}
+
+function onNotifChanged() {
+  window.Telegram?.WebApp?.HapticFeedback?.selectionChanged();
+  syncNotifUI();
+  // Save shortly after the last change (time inputs fire many events)
+  clearTimeout(notifSaveTimer);
+  notifSaveTimer = setTimeout(saveNotificationSettings, 400);
+}
+
+async function saveNotificationSettings() {
+  const body = {
+    newTasks: notif.newTasks.checked,
+    autoDelete: notif.autoDelete.checked,
+    quietHoursEnabled: notif.quiet.checked,
+    quietFrom: notif.quietFrom.value || "22:00",
+    quietTo: notif.quietTo.value || "08:00",
+    mutedSubjectIds: [...notif.subjects.querySelectorAll("input[data-subject-id]")]
+      .filter((i) => !i.checked)
+      .map((i) => Number(i.dataset.subjectId))
+  };
+  try {
+    const res = await apiFetch("/admin/notification-settings", { method: "PUT", body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showNotifStatus(data.error || "Не удалось сохранить", "bad", true);
+      return;
+    }
+    showNotifStatus("Сохранено");
+  } catch (err) {
+    console.error(err);
+    showNotifStatus("Нет соединения — настройки не сохранены", "bad", true);
+  }
+}
+
+[notif.newTasks, notif.autoDelete, notif.quiet, notif.quietFrom, notif.quietTo].forEach((el) =>
+  el.addEventListener("change", onNotifChanged));
+
+notif.testBtn.addEventListener("click", async () => {
+  notif.testBtn.disabled = true;
+  showNotifStatus("Отправляем…", "muted", true);
+  try {
+    const res = await apiFetch("/admin/notification-settings/test", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+      showNotifStatus("Отправлено — проверьте чат с ботом", "ok", true);
+    } else {
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("error");
+      showNotifStatus(data.error || "Не удалось отправить", "bad", true);
+    }
+  } catch (err) {
+    console.error(err);
+    showNotifStatus("Нет соединения", "bad", true);
+  } finally {
+    notif.testBtn.disabled = false;
+  }
+});
 
 // ============================================================
 // SKELETON PLACEHOLDERS (instead of "Загрузка…")
