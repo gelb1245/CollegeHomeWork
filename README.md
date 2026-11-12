@@ -1,11 +1,30 @@
-# Telegram Homework Bot & Mini App 🎓
+# College Homework — Telegram-бот и Mini App 🎓
 
-Система управления домашними заданиями и предметами для колледжа:
-- **Backend**: C# (ASP.NET Core 8 Web API + Entity Framework Core).
-- **Telegram Bot**: Telegram.Bot v22, режим polling или webhook.
-- **Frontend / Mini App**: HTML5, CSS3, JavaScript (Telegram WebApp SDK).
-- **База данных**: PostgreSQL (Neon) в продакшене, SQLite локально.
-- **Файлы к заданиям** (фото, PDF) хранятся в Telegram: в базе только `file_id`.
+Домашние задания группы колледжа внутри Telegram. Староста публикует задания с дедлайнами, фото и PDF. Студенты видят их в Mini App, отмечают «Сдано» и получают уведомления от бота. Староста видит, кто что сдал.
+
+**Стек:** ASP.NET Core 8 + EF Core · PostgreSQL (Neon) в продакшене, SQLite локально · Telegram.Bot 22 · HTML/CSS/JavaScript без фреймворков (Telegram WebApp SDK) · хостинг Render.
+
+---
+
+## ✨ Возможности
+
+**Для студентов**
+- **Предметы** — список предметов со счётчиком несданных заданий, поиск.
+- **Задания** — текст с Markdown, фото и PDF, дедлайн с обратным отсчётом. Отметка «Сдано» и прогресс по предмету.
+- **Дедлайны** — все задания всех предметов на одном экране, по разделам: просрочено, сегодня, завтра, на этой неделе, позже. «Сдано» можно отметить прямо из списка.
+- **Уведомления** — бот присылает новое задание. Через 24 часа уведомление удаляется само, чтобы не засорять чат.
+- **Тёмная и светлая тема** — при первом запуске подхватывается тема Telegram.
+
+**Для старосты (Админ)**
+- **Публикация заданий** — текст, дедлайн с быстрыми вариантами («завтра», «+3 дня», «+1 нед»), до 5 фото или PDF. Фото сжимаются перед загрузкой.
+- **Редактирование и удаление** — изменённое задание помечается «изменено».
+- **Статистика** — вкладка «Группа → Статистика»: процент сданного, просрочки, кто сдал и кто нет по каждому заданию, что не сдал каждый студент (отстающие первыми). На самих заданиях есть значок «сдали 12/18».
+- **Вайтлист через бота** — подтверждение запроса доступа одной кнопкой, добавление по контакту или по пересланному сообщению.
+
+**Для разработчиков**
+- Всё, что может староста, плюс создание и удаление предметов и смена ролей.
+
+**Интерфейс** — нативные для Telegram элементы: системная кнопка «Назад», обновление свайпом вниз, вибрация. Плюс скелетоны при загрузке, плавные анимации и скользящий переключатель.
 
 ---
 
@@ -13,38 +32,44 @@
 
 ```
 CollegeHomeWork/
-├── start_backend.sh / .bat        # Запуск локально (macOS·Linux / Windows)
-├── CollegeHomeWork.sln            # Решение: Backend + Tests
+├── start_backend.sh / .bat         # Локальный запуск (macOS·Linux / Windows)
+├── CollegeHomeWork.sln             # Решение: Backend + Tests
+├── Dockerfile                      # Сборка для Render
 │
-├── Backend/                       # ASP.NET Core 8
+├── Backend/                        # ASP.NET Core 8
 │   ├── Controllers/
-│   │   ├── HomeworkController.cs  # Задания: список, публикация с файлами, редактирование, «Сдано», дедлайны
-│   │   ├── AdminController.cs     # Профиль, предметы, пользователи и роли
-│   │   ├── FilesController.cs     # Отдача фото/PDF по подписанной ссылке
-│   │   └── BotController.cs       # Webhook Telegram (в режиме webhook)
+│   │   ├── HomeworkController.cs   # Задания: список, публикация с файлами, редактирование, «Сдано», дедлайны
+│   │   ├── StatsController.cs      # Статистика для старосты и разработчиков
+│   │   ├── AdminController.cs      # Профиль, предметы, пользователи и роли
+│   │   ├── FilesController.cs      # Отдача фото/PDF по подписанной ссылке
+│   │   └── BotController.cs        # Webhook Telegram (только в режиме webhook)
 │   ├── Services/
-│   │   ├── Bot/                   # Бот: BotUpdateHandler (команды), BotAccessManager (вайтлист, роли),
-│   │   │                          #      BotUpdatesService (режим polling/webhook/off), MiniAppLink
-│   │   ├── AttachmentStorage.cs   # Загрузка файлов в Telegram и проверка их типа
-│   │   ├── AttachmentUrlSigner.cs # Временные подписанные ссылки на файлы
+│   │   ├── Bot/                    # Бот: BotUpdateHandler (команды), BotAccessManager (вайтлист, роли),
+│   │   │                           #      BotUpdatesService (режим polling/webhook/off), MiniAppLink
+│   │   ├── StatsService.cs         # Подсчёт статистики
+│   │   ├── AttachmentStorage.cs    # Файлы в Telegram, проверка типа по содержимому
+│   │   ├── AttachmentUrlSigner.cs  # Временные подписанные ссылки на файлы
 │   │   ├── HomeworkNotificationService.cs # Уведомления студентам (самоудаление через 24 ч)
-│   │   └── TelegramAuthService.cs # Проверка подписи initData Telegram Mini App
-│   ├── Data/                      # DbContext, выбор БД, миграции при старте
-│   ├── Migrations/                # Миграции SQLite и Migrations/Postgres
-│   └── Models/                    # User, ChatGroup, Message, Attachment, ...
+│   │   ├── TelegramAuthService.cs  # Проверка подписи initData Telegram Mini App
+│   │   ├── KeepAliveService.cs     # Не даёт бесплатному Render засыпать
+│   │   └── LocalTime.cs            # Часовой пояс для сообщений бота
+│   ├── Attributes/                 # [TelegramAuthorize] — авторизация и роли для API
+│   ├── Data/                       # DbContext, выбор БД, миграции при старте
+│   ├── Migrations/                 # Миграции SQLite и Migrations/Postgres
+│   └── Models/                     # User, ChatGroup, Message, Attachment, UserTaskProgress, ...
 │
-├── Frontend/                      # Telegram Mini App (index.html, style.css, app.js)
-└── Tests/CollegeHomeWork.Tests/   # xUnit-тесты
+├── Frontend/                       # Telegram Mini App: index.html, style.css, app.js
+└── Tests/CollegeHomeWork.Tests/    # xUnit-тесты
 ```
 
 ---
 
 ## 🚀 Быстрый старт
 
-### 1. Настройка токена
-> ⚠️ **Никогда не коммитьте токен в репозиторий.** `appsettings.json` содержит только пустое значение.
+### 1. Токен бота
+> ⚠️ **Никогда не коммитьте токен в репозиторий.** В `appsettings.json` только пустое значение.
 
-**Локально:** скопируйте `Backend/appsettings.Development.json.example` в `Backend/appsettings.Development.json` (файл в `.gitignore`) и вставьте токен от `@BotFather`:
+Скопируйте `Backend/appsettings.Development.json.example` в `Backend/appsettings.Development.json` (файл в `.gitignore`) и вставьте токен от `@BotFather`:
 ```json
 {
   "Telegram": {
@@ -53,81 +78,133 @@ CollegeHomeWork/
 }
 ```
 
-**На сервере (Render/Docker):** задайте переменные окружения:
+### 2. Запуск
+- **macOS / Linux:** `./start_backend.sh`
+- **Windows:** `start_backend.bat`
+
+Откроется на `http://localhost:5000`:
+- Mini App — `http://localhost:5000/`
+- Документация API (Swagger) — `http://localhost:5000/swagger`
+
+В режиме разработки API пускает без Telegram: вы входите как владелец. Войти другим пользователем можно через заголовок `X-Dev-Telegram-Id: <id>`.
+
+Локально бот **не получает сообщения** (`BOT_UPDATES_MODE=off`), иначе он перехватывал бы их у бота на сервере. Чтобы проверить команды бота локально, запустите `BOT_UPDATES_MODE=polling ./start_backend.sh`. На это время бот на сервере перестанет отвечать.
+
+### 3. Тесты
+```bash
+dotnet test CollegeHomeWork.sln
+```
+48 тестов: проверка подписи Telegram, подписанные ссылки на файлы, распознавание типа файла, статистика (на настоящей SQLite в памяти), разбор строки подключения Neon, часовой пояс.
+
+---
+
+## ⚙️ Настройка
+
+### Переменные окружения (Render → Environment)
 
 | Переменная | Значение |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | токен бота |
-| `DATABASE_URL` | строка подключения PostgreSQL, напр. `postgresql://user:pass@host/db?sslmode=require` (Neon/Supabase). Если не задана — используется локальный SQLite |
+| `TELEGRAM_BOT_TOKEN` | **обязательно** — токен бота. Без него приложение не запустится |
+| `DATABASE_URL` | строка подключения PostgreSQL, напр. `postgresql://user:pass@host/db?sslmode=require` (Neon/Supabase). Не задана — локальный SQLite |
 | `BOT_UPDATES_MODE` | `polling` (по умолчанию), `webhook` или `off` — см. ниже |
 | `TELEGRAM_WEBHOOK_SECRET` | секрет для режима `webhook` (любая длинная случайная строка) |
-| `TELEGRAM_STORAGE_CHAT_ID` | (опционально) чат, куда бот складывает файлы заданий. По умолчанию — чат админа, который загрузил файл |
+| `TELEGRAM_STORAGE_CHAT_ID` | (опционально) чат, куда бот складывает файлы заданий. По умолчанию — чат админа, загрузившего файл |
 | `APP_TIME_ZONE` | часовой пояс для времени в сообщениях бота, по умолчанию `Europe/Kyiv` |
 | `TELEGRAM_API_URL` | (опционально) свой Bot API-сервер: снимает лимит 20 МБ на файлы |
 
-Без токена приложение не запустится и выведет понятную ошибку.
+Адрес Mini App для кнопок бота задаётся в `Backend/appsettings.json` → `Telegram:WebAppUrl` (нужен публичный HTTPS).
+
+### Режимы бота
+| `BOT_UPDATES_MODE` | Как работает |
+|---|---|
+| `polling` | приложение само спрашивает Telegram о новых сообщениях. Работает везде |
+| `webhook` | Telegram присылает сообщения на `/api/bot/webhook`. Нужны `Telegram:WebAppUrl` и `TELEGRAM_WEBHOOK_SECRET` |
+| `off` | бот не получает сообщения (уведомления и файлы при этом работают) |
 
 ### База данных
 Провайдер выбирается автоматически:
-- **PostgreSQL** — если задана переменная `DATABASE_URL` (формат `postgresql://...`). Используется в продакшене.
-- **SQLite** (`Backend/telegrambot.db`) — если переменной нет. Удобно для локальной разработки.
+- **PostgreSQL** — если задана `DATABASE_URL` (формат `postgresql://...`). Используется в продакшене.
+- **SQLite** (`Backend/telegrambot.db`) — если переменной нет.
 
-Схема управляется **только миграциями EF Core** и применяется автоматически при старте. Миграции раздельные: `Backend/Migrations` (SQLite) и `Backend/Migrations/Postgres`. После изменения моделей создайте миграцию для обоих:
+Локально переменные из `.env.local` (его создаёт `neon init`) подхватываются автоматически. С ним локальный запуск работает с базой Neon, без него — с SQLite.
+
+Схема меняется **только миграциями EF Core**, они применяются при старте. Миграции раздельные для SQLite и PostgreSQL, поэтому после изменения моделей нужно создать обе:
 ```bash
 dotnet tool restore
 cd Backend
 dotnet ef migrations add ИмяМиграции --context TelegramBotContext
 dotnet ef migrations add ИмяМиграции --context PostgresTelegramBotContext --output-dir Migrations/Postgres
 ```
-Файл `telegrambot.db` содержит личные данные студентов и не хранится в git.
+Все даты хранятся в UTC, браузер переводит их в местное время.
 
-### 2. Вайтлист
-В [Backend/whitelist.json](Backend/whitelist.json) уже добавлен Telegram ID владельца (`8663026875`, задаётся константой `PrimaryOwnerId` в `Backend/Services/WhitelistService.cs`). Вы можете добавлять других пользователей через запятую:
-```json
-[
-  1645991235,
-  123456789
-]
-```
-
-### 3. Запуск сервера
-- **macOS / Linux:** `./start_backend.sh`
-- **Windows:** `start_backend.bat`
-
-Сервер запустится на `http://localhost:5000` и раздаёт:
-- **Мини-приложение**: `http://localhost:5000/`
-- **Swagger документацию API**: `http://localhost:5000/swagger`
-
-Локально бот **не получает сообщения** (`BOT_UPDATES_MODE=off`): иначе он перехватывал бы их у бота на сервере. Чтобы проверить команды бота локально: `BOT_UPDATES_MODE=polling ./start_backend.sh` (на это время бот на сервере перестанет отвечать).
-
-### Режимы бота
-| `BOT_UPDATES_MODE` | Как работает |
-|---|---|
-| `polling` | приложение само спрашивает Telegram о новых сообщениях. Работает везде |
-| `webhook` | Telegram присылает сообщения на `/api/bot/webhook`. Нужны публичный HTTPS-адрес (`Telegram:WebAppUrl`) и `TELEGRAM_WEBHOOK_SECRET` |
-| `off` | бот не получает сообщения (уведомления и файлы при этом работают) |
-
-### 4. Тесты
-```bash
-dotnet test CollegeHomeWork.sln
-```
+### Файлы к заданиям
+Фото (JPG, PNG, WEBP, GIF) и PDF до 20 МБ, не больше 5 на задание. Бот загружает файл в чат Telegram, а в базе хранится только его `file_id`. Это бесплатно, место в базе не тратится. Тип файла проверяется по содержимому, а не по расширению. Файлы отдаются по подписанным ссылкам, которые действуют 6 часов. Чтобы загружать файлы, админ должен хотя бы раз нажать у бота `/start`.
 
 ---
 
-## 📱 Роли и функционал
+## 👥 Роли
 
-1. **Обычный пользователь (User / Студент)**:
-   - Проверяется по вайтлисту.
-   - В Telegram может отправить `/list` и получить список предметов.
-   - В Mini App открывает нужный предмет («История», «Всесвит», «ДЗ») и видит все задания, дату и время их публикации администратором (режим только для чтения).
+| Роль | Что может |
+|---|---|
+| **Студент** | смотреть задания и дедлайны, отмечать «Сдано» |
+| **Админ (староста)** | + публиковать, редактировать и удалять задания, видеть участников и статистику, одобрять доступ через бота |
+| **Разработчик** | + создавать и удалять предметы, менять роли |
 
-2. **Администратор (Admin)**:
-   - Может писать сообщения в чаты предметов:
-     - Из Telegram: `/post <ID_группы> <текст задания>`
-     - Или прямо из Mini App через поле ввода.
+**Владелец** (`PrimaryOwnerId` в `Backend/Services/WhitelistService.cs`, сейчас `8663026875`) всегда получает роль Разработчика. Его нельзя удалить или понизить, и ему бот присылает запросы доступа.
 
-3. **Разработчик (Developer)**:
-   - Полное управление через HTTP API или Mini App:
-     - Создание новых групп/предметов (`POST /api/admin/group`).
-     - Удаление предметов (`DELETE /api/admin/group/{id}`).
-     - Назначение ролей (`PATCH /api/admin/user/{telegramId}/role/{Admin|Developer|User}`).
+В статистике **студентами** считаются роли «Студент» и «Админ» (староста тоже сдаёт задания). **Просрочка** — дедлайн прошёл, а отметки «Сдано» нет.
+
+### Доступ (вайтлист)
+Пользоваться приложением могут только те, кто есть в вайтлисте. Добавить человека можно так:
+- **Запрос доступа:** незнакомый пользователь пишет боту, владельцу приходит кнопка «Добавить студента / Сделать админом».
+- **Через бота:** админ пересылает боту сообщение человека или делится его контактом.
+- **В Mini App** (разработчик): «Группа → Участники → Добавить».
+- **В файле:** [Backend/whitelist.json](Backend/whitelist.json).
+
+> ⚠️ **Известное ограничение:** вайтлист хранится в файле `whitelist.json`. На Render файлы стираются при каждом деплое, поэтому люди, добавленные через бота или приложение, после деплоя пропадают. Сохраняются только ID, записанные в файле в репозитории. Планируется перенос вайтлиста в базу.
+
+### Команды бота
+| Команда | Что делает |
+|---|---|
+| `/start` (или любое сообщение) | приветствие и кнопка открытия Mini App |
+| `/deadlines` | ближайшие дедлайны и сколько из них сдано |
+
+---
+
+## 🔌 API
+
+Все запросы к `/api/admin/*` авторизуются подписью Telegram: заголовок `Authorization: Bearer <initData>`.
+
+| Метод | Путь | Кто | Что делает |
+|---|---|---|---|
+| GET | `/api/admin/me` | все | текущий пользователь и роль |
+| GET | `/api/admin/groups` | все | предметы со счётчиком несданных |
+| GET | `/api/admin/group/{id}/messages` | все | задания предмета (админам — ещё «сдали X/N») |
+| GET | `/api/admin/my-deadlines` | все | задания с дедлайнами по всем предметам |
+| POST | `/api/admin/message/{id}/toggle-complete` | все | отметить / снять «Сдано» |
+| POST | `/api/admin/group/{id}/message` | админ | опубликовать задание (multipart: `text`, `deadline`, `files`) |
+| PATCH | `/api/admin/message/{id}` | админ | изменить задание (+ `removeAttachmentIds`) |
+| DELETE | `/api/admin/message/{id}` | админ | удалить задание |
+| GET | `/api/admin/stats` | админ | статистика: итоги, по заданиям, по студентам |
+| GET | `/api/admin/message/{id}/progress` | админ | кто сдал и кто нет |
+| GET | `/api/admin/stats/student/{id}` | админ | несданные задания студента |
+| GET | `/api/admin/users` | админ | участники |
+| POST | `/api/admin/user` | разработчик | добавить в вайтлист |
+| PATCH | `/api/admin/user/{id}/role/{role}` | разработчик | сменить роль |
+| DELETE | `/api/admin/user/{id}` | разработчик | удалить пользователя |
+| POST / DELETE | `/api/admin/group`, `/api/admin/group/{id}` | разработчик | создать / удалить предмет |
+| GET | `/api/files/{id}?exp=…&sig=…` | по ссылке | файл задания (подписанная ссылка) |
+| GET | `/health` | все | проверка, что сервер жив |
+
+Полное описание — в Swagger: `/swagger` в режиме разработки.
+
+---
+
+## ☁️ Деплой (Render + Neon)
+
+1. **База:** создайте проект в [Neon](https://neon.tech) и скопируйте строку подключения (вариант **Pooled**).
+2. **Render:** создайте Web Service из этого репозитория, он соберётся по `Dockerfile`.
+3. **Environment на Render:** задайте `TELEGRAM_BOT_TOKEN` и `DATABASE_URL`.
+4. **Публикация:** каждый пуш в `main` деплоится автоматически. Миграции базы применяются сами при старте.
+
+На бесплатном тарифе Render сервис засыпает после 15 минут без запросов. `KeepAliveService` пингует `/health` раз в 10 минут, чтобы этого не происходило.
