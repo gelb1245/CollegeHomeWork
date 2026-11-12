@@ -21,6 +21,9 @@ public record TaskProgressDetails(int Id, string GroupName, string Text, DateTim
 
 public record PendingTask(int Id, int GroupId, string GroupName, string Text, DateTime? Deadline, bool IsOverdue);
 
+/// <summary>Overview plus (taskId, studentId) → completion time for every completed pair.</summary>
+public record CompletionMatrix(StatsOverview Overview, IReadOnlyDictionary<(int TaskId, long UserId), DateTime?> Done);
+
 public record StudentDetails(long TelegramId, string Name, int Completed, int Total, IReadOnlyList<PendingTask> Pending);
 
 /// <summary>
@@ -136,6 +139,24 @@ public class StatsService
 
         return new StudentDetails(student.TelegramId, DisplayName(student),
             tasks.Count(t => doneIds.Contains(t.Id)), tasks.Count, pending);
+    }
+
+    /// <summary>
+    /// Full completion table for the Excel export: every student × every task, with completion times.
+    /// </summary>
+    public async Task<CompletionMatrix> GetCompletionMatrixAsync(DateTime nowUtc, CancellationToken ct)
+    {
+        var overview = await GetOverviewAsync(nowUtc, ct);
+        var studentIds = overview.Students.Select(s => s.TelegramId).ToHashSet();
+
+        var done = (await _db.UserTaskProgresses.AsNoTracking()
+                .Where(p => p.IsCompleted)
+                .Select(p => new { p.MessageId, p.UserId, p.CompletedAt })
+                .ToListAsync(ct))
+            .Where(p => studentIds.Contains(p.UserId))
+            .ToDictionary(p => (p.MessageId, p.UserId), p => p.CompletedAt);
+
+        return new CompletionMatrix(overview, done);
     }
 
     /// <summary>Number of students — the denominator for "сдали X из N".</summary>

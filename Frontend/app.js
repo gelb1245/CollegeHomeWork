@@ -460,6 +460,7 @@ async function loadGroups(prefetchedGroups = null, prefetchedDeadlines = null) {
     cachedGroups = await res.json();
     writeCache("cache-groups", cachedGroups);
     renderGroupsList(cachedGroups);
+    if (groupSearchInput.value.trim().length >= 2) scheduleTaskSearch(0);
     await loadDeadlinesSummary(prefetchedDeadlines);
   } catch (err) {
     console.error(err);
@@ -526,8 +527,11 @@ function renderGroupsList(groups) {
 
   groupsCounter.textContent = filtered.length;
 
+  const searching = query.length >= 2;
+  groupsScreen.classList.toggle("searching", searching);
+  groupsScreen.classList.toggle("no-subject-hits", searching && filtered.length === 0);
   if (filtered.length === 0) {
-    groupsList.innerHTML = '<div class="empty-state">Предметы не найдены.</div>';
+    groupsList.innerHTML = searching ? "" : '<div class="empty-state">Предметы не найдены.</div>';
     return;
   }
 
@@ -558,7 +562,10 @@ function renderGroupsList(groups) {
   });
 }
 
-groupSearchInput.addEventListener("input", () => renderGroupsList(cachedGroups));
+groupSearchInput.addEventListener("input", () => {
+  renderGroupsList(cachedGroups);
+  scheduleTaskSearch();
+});
 
 // ============================================================
 // CHAT / MESSAGES
@@ -1915,6 +1922,129 @@ notif.testBtn.addEventListener("click", async () => {
     showNotifStatus("Нет соединения", "bad", true);
   } finally {
     notif.testBtn.disabled = false;
+  }
+});
+
+// ============================================================
+// TASK SEARCH (the search box on the subjects screen)
+// ============================================================
+const taskSearchBlock = document.getElementById("taskSearchBlock");
+const taskSearchResults = document.getElementById("taskSearchResults");
+const taskSearchCounter = document.getElementById("taskSearchCounter");
+let taskSearchTimer = null;
+let taskSearchSeq = 0;
+
+function scheduleTaskSearch(delay = 300) {
+  clearTimeout(taskSearchTimer);
+  const q = groupSearchInput.value.trim();
+  if (q.length < 2) {
+    taskSearchBlock.classList.add("hidden");
+    return;
+  }
+  taskSearchBlock.classList.remove("hidden");
+  taskSearchTimer = setTimeout(() => runTaskSearch(q), delay);
+}
+
+async function runTaskSearch(q) {
+  const seq = ++taskSearchSeq; // ignore answers to older queries that arrive late
+  if (!taskSearchResults.querySelector(".stats-row")) taskSearchResults.innerHTML = skeleton("deadline", 2);
+  try {
+    const res = await apiFetch(`/admin/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const hits = await res.json();
+    if (seq !== taskSearchSeq) return;
+    renderTaskSearch(hits, q);
+  } catch (err) {
+    console.error(err);
+    if (seq === taskSearchSeq) taskSearchResults.innerHTML = '<div class="empty-state">Поиск не удался. Проверьте соединение.</div>';
+  }
+}
+
+/** Escapes the text and wraps every searched word in <mark>; "е" and "ё" are treated as the same letter. */
+function highlight(text, query) {
+  let html = escapeHtml(text);
+  const words = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 2)
+    .map((w) => escapeHtml(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[её]/g, "[её]"));
+  if (words.length === 0) return html;
+  return html.replace(new RegExp(`(${words.join("|")})`, "giu"), "<mark>$1</mark>");
+}
+
+function renderTaskSearch(hits, q) {
+  taskSearchCounter.textContent = hits.length >= 30 ? "30+" : hits.length;
+  if (hits.length === 0) {
+    taskSearchResults.innerHTML = `<div class="empty-state fade-in">Ничего не найдено по запросу «${escapeHtml(q)}»</div>`;
+    return;
+  }
+  const now = new Date();
+  const box = document.createElement("div");
+  box.className = "deadline-section-items fade-in";
+  hits.forEach((h) => {
+    const deadline = h.deadline ? new Date(h.deadline) : null;
+    const side = h.isCompleted
+      ? '<span class="stats-row-sub ok">сдано</span>'
+      : deadline
+        ? `<span class="stats-row-sub ${deadline < now ? "bad" : ""}">${deadline < now ? "просрочено" : "до " + deadline.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>`
+        : `<span class="stats-row-sub">${new Date(h.sentAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>`;
+
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "stats-row search-hit";
+    row.innerHTML = `
+      <div class="stats-row-body">
+        <div class="deadline-item-subject">${getSubjectIcon(h.groupName)}<span>${highlight(h.groupName, q)}</span></div>
+        <div class="search-snippet">${highlight(h.snippet || "Без описания", q)}</div>
+        ${h.matchedFile ? `<div class="search-file">${icon("fileText")}<span>${highlight(h.matchedFile, q)}</span></div>` : ""}
+      </div>
+      <div class="stats-row-side">${side}</div>`;
+    row.addEventListener("click", () => {
+      const group = cachedGroups.find((g) => g.id === h.groupId);
+      openChat(h.groupId, h.groupName, group?.description, { highlightId: h.id });
+    });
+    box.appendChild(row);
+  });
+  taskSearchResults.innerHTML = "";
+  taskSearchResults.appendChild(box);
+}
+
+// ============================================================
+// EXCEL EXPORT of statistics
+// ============================================================
+const exportStatsBtn = document.getElementById("exportStatsBtn");
+const exportStatus = document.getElementById("exportStatus");
+
+function showExportStatus(text, tone) {
+  exportStatus.textContent = text;
+  exportStatus.className = `notif-status visible ${tone}`;
+}
+
+exportStatsBtn.addEventListener("click", async () => {
+  exportStatsBtn.disabled = true;
+  showExportStatus("Готовим файл…", "muted");
+  try {
+    if (isInsideTelegram()) {
+      // Inside Telegram the bot sends the file to the chat: downloads in the Mini App are unreliable
+      const res = await apiFetch("/admin/stats/export/send", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Не удалось отправить файл");
+      window.Telegram.WebApp.HapticFeedback?.notificationOccurred("success");
+      showExportStatus("Файл отправлен в чат с ботом", "ok");
+    } else {
+      const res = await apiFetch("/admin/stats/export");
+      if (!res.ok) throw new Error("Не удалось подготовить файл");
+      const name = decodeURIComponent((res.headers.get("Content-Disposition") || "").match(/filename\*=UTF-8''([^;]+)/)?.[1] || "Статистика.xlsx");
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href: url, download: name });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      showExportStatus("Файл скачан", "ok");
+    }
+  } catch (err) {
+    console.error(err);
+    showExportStatus(err.message || "Не удалось выгрузить", "bad");
+  } finally {
+    exportStatsBtn.disabled = false;
   }
 });
 

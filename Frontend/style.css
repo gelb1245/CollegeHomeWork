@@ -2107,6 +2107,65 @@ button { font-family: var(--font); }
 .notif-status.muted { color: var(--text-secondary); }
 
 /* ============================================
+   SEARCH (subjects screen) & EXCEL EXPORT
+   ============================================ */
+.search-bar input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* While searching: hide the deadlines banner; with no matching subjects, hide that block too */
+#groupsScreen.searching .deadlines-summary-card { display: none; }
+#groupsScreen.no-subject-hits #groupsList,
+#groupsScreen.no-subject-hits .section-title-row:has(#groupsCounter) { display: none; }
+
+.task-search-block { margin-top: 18px; }
+#groupsScreen.no-subject-hits .task-search-block { margin-top: 2px; }
+
+.search-snippet {
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  white-space: normal;
+}
+.search-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.search-file .ico { width: 12px; height: 12px; flex-shrink: 0; }
+.search-file span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-hit .stats-row-side { width: auto; min-width: 60px; }
+
+mark {
+  background: rgba(255, 204, 0, 0.35);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+:root[data-theme="light"] mark { background: rgba(255, 196, 0, 0.45); }
+
+.stats-row-sub.ok { color: var(--success); }
+
+.export-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.export-btn .ico { width: 17px; height: 17px; }
+.export-btn:disabled { opacity: 0.6; }
+#exportStatus { margin: 0 0 10px; min-height: 0; }
+#exportStatus.visible { min-height: 18px; }
+
+/* ============================================
    MOTION — short, transform/opacity only (fast on low-end phones)
    ============================================ */
 
