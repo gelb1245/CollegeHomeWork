@@ -131,6 +131,7 @@ builder.Services.AddSingleton<TelegramAuthService>(sp =>
     new TelegramAuthService(botToken, sp.GetRequiredService<ILogger<TelegramAuthService>>()));
 builder.Services.AddSingleton<HomeworkNotificationService>();
 builder.Services.AddSingleton<AttachmentStorage>();
+builder.Services.AddScoped<StatsService>();
 builder.Services.AddSingleton(new AttachmentUrlSigner(botToken));
 
 // 8. Configure Telegram Bot Client

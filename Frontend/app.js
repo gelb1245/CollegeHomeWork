@@ -49,6 +49,7 @@ const ICONS = {
   lock: '<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   checkMark: '<path d="M20 6 9 17l-5-5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
   pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -388,8 +389,8 @@ function switchScreen(screenId) {
     headerTitle.textContent = "Дедлайны";
     loadDeadlinesScreen();
   } else if (screenId === "usersScreen") {
-    headerTitle.textContent = "Вайтлист";
-    loadUsers();
+    headerTitle.textContent = "Группа";
+    if (currentUsersTab === "stats") loadStats(); else loadUsers();
   } else if (screenId === "settingsScreen") {
     headerTitle.textContent = "Настройки";
   }
@@ -758,12 +759,16 @@ function createMessageCard(m) {
     <div class="message-text">${textHtml}</div>
     ${renderAttachments(m.attachments)}
     <div class="message-footer-row">
-      <div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>
+      <div class="footer-left">
+        <div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>
+        ${m.completedCount != null ? `<button type="button" class="done-count-chip" title="Кто сдал">${icon("users")}<span>${m.completedCount}/${m.studentsTotal}</span></button>` : ""}
+      </div>
       <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}">${toggleButtonHtml(m.isCompleted)}</button>
     </div>
   `;
 
   card.querySelector(".task-toggle-btn").addEventListener("click", () => toggleTaskComplete(m.id));
+  card.querySelector(".done-count-chip")?.addEventListener("click", () => openTaskProgressSheet(m.id));
   if (canManage) {
     card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
     card.querySelector(".edit-msg-btn")?.addEventListener("click", () => startEdit(m));
@@ -829,6 +834,11 @@ async function toggleTaskComplete(msgId) {
         button.classList.add("just-done");
       }
       card.querySelector(".deadline-slot").innerHTML = formatDeadlineBadge(msg.deadline, msg.isCompleted);
+      if (msg.completedCount != null && currentUser.role === "Admin") {
+        msg.completedCount += msg.isCompleted ? 1 : -1;
+        const chip = card.querySelector(".done-count-chip span");
+        if (chip) chip.textContent = `${msg.completedCount}/${msg.studentsTotal}`;
+      }
     } else if (card) {
       // The task no longer matches the filter ("Не сдано" / "Сдано") — fold it away
       await collapseAndRemove(card);
@@ -1560,6 +1570,232 @@ async function toggleDeadlineItem(d, item) {
 }
 
 // ============================================================
+// BOTTOM SHEET
+// ============================================================
+const sheet = document.getElementById("sheet");
+const sheetTitle = document.getElementById("sheetTitle");
+const sheetSubtitle = document.getElementById("sheetSubtitle");
+const sheetBody = document.getElementById("sheetBody");
+
+function openSheet(title, subtitle, bodyHtml) {
+  sheetTitle.textContent = title;
+  sheetSubtitle.textContent = subtitle || "";
+  sheetBody.innerHTML = bodyHtml;
+  sheetBody.scrollTop = 0;
+  sheet.classList.remove("hidden", "closing");
+  updateTelegramBackButton();
+}
+
+function closeSheet() {
+  if (sheet.classList.contains("hidden")) return;
+  sheet.classList.add("closing");
+  setTimeout(() => {
+    sheet.classList.add("hidden");
+    sheet.classList.remove("closing");
+    updateTelegramBackButton();
+  }, prefersReducedMotion() ? 0 : 200);
+}
+
+document.getElementById("sheetClose").addEventListener("click", closeSheet);
+sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSheet(); });
+
+// ============================================================
+// STATISTICS (monitor & developers): Группа → Статистика
+// ============================================================
+const statsPane = document.getElementById("statsPane");
+const membersPane = document.getElementById("membersPane");
+const statsTotals = document.getElementById("statsTotals");
+const statsList = document.getElementById("statsList");
+const usersTabs = document.querySelectorAll(".users-tab");
+const statsViewTabs = document.querySelectorAll(".stats-view-tab");
+
+let currentUsersTab = "members";   // "members" | "stats"
+let currentStatsView = "tasks";    // "tasks" | "students"
+let cachedStats = null;
+
+usersTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    usersTabs.forEach((t) => t.classList.toggle("active", t === tab));
+    currentUsersTab = tab.dataset.usersTab;
+    const isStats = currentUsersTab === "stats";
+    statsPane.classList.toggle("hidden", !isStats);
+    membersPane.classList.toggle("hidden", isStats);
+    if (isStats) loadStats(); else loadUsers();
+    requestAnimationFrame(() => refreshIndicators(true));
+  });
+});
+
+statsViewTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    statsViewTabs.forEach((t) => t.classList.toggle("active", t === tab));
+    currentStatsView = tab.dataset.statsView;
+    renderStatsList();
+  });
+});
+
+async function loadStats(silent = false) {
+  if (!silent || !cachedStats) {
+    statsTotals.innerHTML = `<div class="stat-tile skel"></div>`.repeat(3);
+    statsList.innerHTML = skeleton("deadline", 4);
+  }
+  try {
+    const res = await apiFetch("/admin/stats");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    cachedStats = await res.json();
+    renderStats();
+  } catch (err) {
+    console.error(err);
+    statsTotals.innerHTML = "";
+    statsList.innerHTML = '<div class="empty-state">Не удалось загрузить статистику. Потяните вниз, чтобы повторить.</div>';
+  }
+}
+
+function renderStats() {
+  const t = cachedStats.totals;
+  statsTotals.innerHTML = `
+    <div class="stat-tile"><span class="stat-value">${t.students}</span><span class="stat-label">студентов</span></div>
+    <div class="stat-tile"><span class="stat-value">${t.completionPercent}%</span><span class="stat-label">сдано</span></div>
+    <div class="stat-tile ${t.overdueCount ? "bad" : ""}"><span class="stat-value">${t.overdueCount}</span><span class="stat-label">просрочек</span></div>`;
+  renderStatsList();
+}
+
+function progressBar(done, total) {
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  const tone = percent === 100 ? "full" : percent < 50 ? "low" : "";
+  return `<div class="mini-progress ${tone}"><div style="width:${percent}%"></div></div>`;
+}
+
+function renderStatsList() {
+  if (!cachedStats) return;
+  const now = new Date();
+  const rows = document.createElement("div");
+  rows.className = "deadline-section-items fade-in";
+
+  if (currentStatsView === "tasks") {
+    if (cachedStats.tasks.length === 0) {
+      statsList.innerHTML = '<div class="empty-state">Заданий пока нет.</div>';
+      return;
+    }
+    cachedStats.tasks.forEach((task) => {
+      const deadline = task.deadline ? new Date(task.deadline) : null;
+      const overdue = deadline && deadline < now && task.completed < task.total;
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "stats-row";
+      row.innerHTML = `
+        <div class="stats-row-body">
+          <div class="deadline-item-subject">${getSubjectIcon(task.groupName)}<span>${escapeHtml(task.groupName)}</span></div>
+          <div class="stats-row-title">${escapeHtml(plainPreview(task.text)) || "Без описания"}</div>
+          ${progressBar(task.completed, task.total)}
+        </div>
+        <div class="stats-row-side">
+          <span class="stats-row-count">${task.completed}/${task.total}</span>
+          <span class="stats-row-sub ${overdue ? "bad" : ""}">${deadline
+            ? (overdue ? "просрочено" : deadline.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }))
+            : "без срока"}</span>
+        </div>`;
+      row.addEventListener("click", () => openTaskProgressSheet(task.id));
+      rows.appendChild(row);
+    });
+  } else {
+    if (cachedStats.students.length === 0) {
+      statsList.innerHTML = '<div class="empty-state">Студенты ещё не заходили в приложение.</div>';
+      return;
+    }
+    cachedStats.students.forEach((st) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "stats-row";
+      row.innerHTML = `
+        <div class="user-avatar small">${escapeHtml((st.name || "?")[0].toUpperCase())}</div>
+        <div class="stats-row-body">
+          <div class="stats-row-title">${escapeHtml(st.name)}${formatRoleName(st.role) === "Admin" ? ' <span class="role-pill admin">староста</span>' : ""}</div>
+          ${progressBar(st.completed, st.total)}
+        </div>
+        <div class="stats-row-side">
+          <span class="stats-row-count">${st.completed}/${st.total}</span>
+          <span class="stats-row-sub ${st.overdue ? "bad" : ""}">${st.overdue ? `${st.overdue} просроч.` : "без долгов"}</span>
+        </div>`;
+      row.addEventListener("click", () => openStudentSheet(st.telegramId));
+      rows.appendChild(row);
+    });
+  }
+  statsList.innerHTML = "";
+  statsList.appendChild(rows);
+}
+
+function personListHtml(people, emptyText, withTime) {
+  if (people.length === 0) return `<div class="sheet-empty">${emptyText}</div>`;
+  return `<div class="sheet-people">${people.map((p) => `
+    <div class="sheet-person">
+      <div class="user-avatar small">${escapeHtml((p.name || "?")[0].toUpperCase())}</div>
+      <span class="sheet-person-name">${escapeHtml(p.name)}</span>
+      ${withTime && p.completedAt ? `<span class="sheet-person-time">${new Date(p.completedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>` : ""}
+    </div>`).join("")}</div>`;
+}
+
+async function openTaskProgressSheet(messageId) {
+  openSheet("Загрузка…", "", skeleton("user", 3));
+  try {
+    const res = await apiFetch(`/admin/message/${messageId}/progress`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const p = await res.json();
+    const total = p.done.length + p.notDone.length;
+    const overdue = p.deadline && new Date(p.deadline) < new Date();
+    openSheet(plainPreview(p.text).slice(0, 80) || "Задание", `${p.groupName} · сдали ${p.done.length} из ${total}`, `
+      ${progressBar(p.done.length, total)}
+      <div class="sheet-section-title ${overdue && p.notDone.length ? "bad" : ""}">Не сдали · ${p.notDone.length}${overdue && p.notDone.length ? " · срок прошёл" : ""}</div>
+      ${personListHtml(p.notDone, "Все сдали 🎉", false)}
+      <div class="sheet-section-title">Сдали · ${p.done.length}</div>
+      ${personListHtml(p.done, "Пока никто не сдал", true)}`);
+  } catch (err) {
+    console.error(err);
+    openSheet("Ошибка", "", '<div class="sheet-empty">Не удалось загрузить данные.</div>');
+  }
+}
+
+async function openStudentSheet(telegramId) {
+  openSheet("Загрузка…", "", skeleton("deadline", 3));
+  try {
+    const res = await apiFetch(`/admin/stats/student/${telegramId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const st = await res.json();
+    const pendingHtml = st.pending.length === 0
+      ? '<div class="sheet-empty">Все задания сданы 🎉</div>'
+      : `<div class="deadline-section-items">${st.pending.map((t) => `
+          <button type="button" class="stats-row" data-open-task="${t.id}" data-group="${t.groupId}">
+            <div class="stats-row-body">
+              <div class="deadline-item-subject">${getSubjectIcon(t.groupName)}<span>${escapeHtml(t.groupName)}</span></div>
+              <div class="stats-row-title">${escapeHtml(plainPreview(t.text)) || "Без описания"}</div>
+            </div>
+            <div class="stats-row-side">
+              <span class="stats-row-sub ${t.isOverdue ? "bad" : ""}">${t.deadline
+                ? (t.isOverdue ? "просрочено" : new Date(t.deadline).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }))
+                : "без срока"}</span>
+            </div>
+          </button>`).join("")}</div>`;
+    openSheet(st.name, `сдано ${st.completed} из ${st.total}`, `
+      ${progressBar(st.completed, st.total)}
+      <div class="sheet-section-title">Не сдано · ${st.pending.length}</div>
+      ${pendingHtml}`);
+
+    // A task in the list opens it in its subject
+    sheetBody.querySelectorAll("[data-open-task]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const groupId = Number(btn.dataset.group);
+        const group = cachedGroups.find((g) => g.id === groupId);
+        closeSheet();
+        openChat(groupId, group?.name || "Предмет", group?.description,
+          { returnTo: "usersScreen", highlightId: Number(btn.dataset.openTask) });
+      });
+    });
+  } catch (err) {
+    console.error(err);
+    openSheet("Ошибка", "", '<div class="sheet-empty">Не удалось загрузить данные.</div>');
+  }
+}
+
+// ============================================================
 // SKELETON PLACEHOLDERS (instead of "Загрузка…")
 // ============================================================
 function skeleton(kind, count) {
@@ -1632,6 +1868,8 @@ function refreshIndicators(animate = false) {
 setupSlidingIndicator(document.querySelector(".groups-filter-tabs"), ".groups-filter-tab");
 setupSlidingIndicator(document.querySelector(".chat-filter-tabs"), ".chat-filter-tab");
 setupSlidingIndicator(document.querySelector(".deadline-filter-tabs"), ".deadline-filter-tab");
+setupSlidingIndicator(document.querySelector(".users-tabs"), ".users-tab");
+setupSlidingIndicator(document.querySelector(".stats-view-tabs"), ".stats-view-tab");
 setupSlidingIndicator(document.querySelector(".theme-toggle-group"), ".theme-btn");
 setupSlidingIndicator(document.querySelector(".bottom-nav"), ".nav-item");
 window.addEventListener("resize", () => refreshIndicators(false));
@@ -1645,6 +1883,7 @@ const isInsideTelegram = () => Boolean(window.Telegram?.WebApp?.initData);
 /** What the Back button should do right now (most specific first), or null. */
 function currentBackAction() {
   if (!lightbox.classList.contains("hidden")) return closeLightbox;
+  if (!sheet.classList.contains("hidden")) return closeSheet;
   if (!addUserModal.classList.contains("hidden")) return () => {
     addUserModal.classList.add("hidden");
     updateTelegramBackButton();
@@ -1696,7 +1935,7 @@ function refreshCurrentScreen() {
   if (chatScreen.classList.contains("active") && currentGroupId) {
     return Promise.all([loadMessages(currentGroupId, true), loadDeadlinesSummary()]);
   }
-  if (usersScreen.classList.contains("active")) return loadUsers();
+  if (usersScreen.classList.contains("active")) return currentUsersTab === "stats" ? loadStats(true) : loadUsers();
   if (groupsScreen.classList.contains("active")) return loadGroups();
   if (deadlinesScreen.classList.contains("active")) return loadDeadlinesScreen(true);
   return null;
@@ -1712,7 +1951,7 @@ function setPullPosition(distance) {
 document.addEventListener("touchstart", (e) => {
   if (pull.refreshing || window.scrollY > 0 || currentBackAction() === closeLightbox) return;
   // Do not hijack gestures inside inputs, the composer or horizontally scrolling chips
-  if (e.target.closest("textarea, input, select, .chat-input-bar-wrapper, .filter-tabs, .modal-overlay")) return;
+  if (e.target.closest("textarea, input, select, .chat-input-bar-wrapper, .filter-tabs, .modal-overlay, .sheet-overlay")) return;
   pull.startY = e.touches[0].clientY;
   pull.distance = 0;
 }, { passive: true });

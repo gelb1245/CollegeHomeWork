@@ -162,6 +162,22 @@
 
       <!-- SCREEN 3: Users & Whitelist -->
       <section id="usersScreen" class="screen">
+        <div class="users-tabs">
+          <button class="users-tab active" data-users-tab="members">Участники</button>
+          <button class="users-tab" data-users-tab="stats">Статистика</button>
+        </div>
+
+        <!-- Statistics for the monitor and developers -->
+        <div id="statsPane" class="hidden">
+          <div id="statsTotals" class="stats-tiles"></div>
+          <div class="stats-view-tabs">
+            <button class="stats-view-tab active" data-stats-view="tasks">По заданиям</button>
+            <button class="stats-view-tab" data-stats-view="students">По студентам</button>
+          </div>
+          <div id="statsList" class="stats-list"></div>
+        </div>
+
+        <div id="membersPane">
         <div class="section-title-row users-header-row">
           <div>
             <h2>Вайтлист и участники</h2>
@@ -183,6 +199,7 @@
 
         <div id="usersList" class="users-list">
           <div class="skeleton-list" aria-label="Загрузка"><div class="user-card skeleton-item" aria-hidden="true"><div class="user-avatar skel"></div><div class="user-info"><div class="skel skel-line w45"></div><div class="skel skel-line sm w70"></div></div></div><div class="user-card skeleton-item" aria-hidden="true"><div class="user-avatar skel"></div><div class="user-info"><div class="skel skel-line w45"></div><div class="skel skel-line sm w70"></div></div></div><div class="user-card skeleton-item" aria-hidden="true"><div class="user-avatar skel"></div><div class="user-info"><div class="skel skel-line w45"></div><div class="skel skel-line sm w70"></div></div></div></div>
+        </div>
         </div>
       </section>
 
@@ -267,7 +284,7 @@
           <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
           <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
-        <span class="nav-label">Вайтлист</span>
+        <span class="nav-label">Группа</span>
       </button>
       <button class="nav-item" id="navSettingsTab" data-screen="settingsScreen">
         <svg class="nav-svg" viewBox="0 0 24 24">
@@ -307,6 +324,21 @@
       <div class="modal-footer">
         <button id="saveUserBtn" class="btn primary-btn">Сохранить</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Bottom sheet (statistics details) -->
+  <div id="sheet" class="sheet-overlay hidden">
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <div class="sheet-heading">
+          <div id="sheetSubtitle" class="sheet-subtitle"></div>
+          <h3 id="sheetTitle"></h3>
+        </div>
+        <button type="button" id="sheetClose" class="close-btn" title="Закрыть">&times;</button>
+      </div>
+      <div id="sheetBody" class="sheet-body"></div>
     </div>
   </div>
 

@@ -23,7 +23,10 @@ public record MessageResponseDto(
     DateTime? EditedAt,
     bool IsCompleted,
     DateTime? CompletedAt,
-    IReadOnlyList<AttachmentDto> Attachments);
+    IReadOnlyList<AttachmentDto> Attachments,
+    // Only for Admin/Developer: how many students marked the task as done, out of how many
+    int? CompletedCount = null,
+    int? StudentsTotal = null);
 
 /// <summary>Form for creating a homework message (multipart/form-data, files are optional).</summary>
 public class HomeworkForm
@@ -57,6 +60,7 @@ public class HomeworkController : ControllerBase
     private readonly HomeworkNotificationService _notifications;
     private readonly AttachmentStorage _storage;
     private readonly AttachmentUrlSigner _signer;
+    private readonly StatsService _stats;
     private readonly ILogger<HomeworkController> _log;
 
     private User CurrentUser => (User)HttpContext.Items["CurrentUser"]!;
@@ -66,8 +70,10 @@ public class HomeworkController : ControllerBase
         HomeworkNotificationService notifications,
         AttachmentStorage storage,
         AttachmentUrlSigner signer,
+        StatsService stats,
         ILogger<HomeworkController> log)
     {
+        _stats = stats;
         _db = db;
         _notifications = notifications;
         _storage = storage;
@@ -85,6 +91,7 @@ public class HomeworkController : ControllerBase
         limit = Math.Clamp(limit, 1, 100);
 
         var userId = CurrentUser.TelegramId;
+        var isPrivileged = CurrentUser.Role is RoleType.Admin or RoleType.Developer;
 
         var rows = await _db.Messages
             .AsNoTracking()
@@ -108,9 +115,15 @@ public class HomeworkController : ControllerBase
                 Progress = _db.UserTaskProgresses
                     .Where(p => p.MessageId == m.Id && p.UserId == userId)
                     .Select(p => new { p.IsCompleted, p.CompletedAt })
-                    .FirstOrDefault()
+                    .FirstOrDefault(),
+                CompletedCount = isPrivileged
+                    ? _db.UserTaskProgresses.Count(p => p.MessageId == m.Id && p.IsCompleted &&
+                        p.User != null && (p.User.Role == RoleType.User || p.User.Role == RoleType.Admin))
+                    : 0
             })
             .ToListAsync(cancellationToken);
+
+        int? studentsTotal = isPrivileged ? await _stats.CountStudentsAsync(cancellationToken) : null;
 
         var result = rows
             .OrderBy(m => m.SentAt)
@@ -118,7 +131,9 @@ public class HomeworkController : ControllerBase
                 m.Id, m.ChatGroupId, m.FromUserId, m.Author, m.Text, m.SentAt, m.Deadline, m.EditedAt,
                 m.Progress?.IsCompleted ?? false,
                 m.Progress?.CompletedAt,
-                m.Attachments.Select(a => ToDto(a.Id, a.FileName, a.ContentType, a.Size)).ToList()))
+                m.Attachments.Select(a => ToDto(a.Id, a.FileName, a.ContentType, a.Size)).ToList(),
+                isPrivileged ? m.CompletedCount : null,
+                studentsTotal))
             .ToList();
 
         return Ok(result);
