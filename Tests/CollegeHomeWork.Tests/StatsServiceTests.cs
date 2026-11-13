@@ -127,6 +127,23 @@ public class StatsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Lectures_AreNotPartOfStatistics()
+    {
+        var groupId = _db.ChatGroups.First().Id;
+        _db.Messages.Add(new Message { ChatGroupId = groupId, FromUserId = Monitor, Text = "Лекция: конспект",
+            SentAt = Now, Kind = TaskKind.Lecture });
+        _db.SaveChanges();
+
+        var overview = await Service.GetOverviewAsync(Now, default);
+        Assert.Equal(3, overview.Totals.Tasks);              // still only the 3 homework tasks
+        Assert.Equal(33, overview.Totals.CompletionPercent);  // not diluted by the lecture
+        Assert.DoesNotContain(overview.Tasks, t => t.Text.StartsWith("Лекция"));
+
+        var vera = await Service.GetStudentAsync(S3, Now, default);
+        Assert.DoesNotContain(vera!.Pending, t => t.Text.StartsWith("Лекция")); // nothing to hand in
+    }
+
+    [Fact]
     public async Task UnknownTask_ReturnsNull()
     {
         Assert.Null(await Service.GetTaskProgressAsync(99999, default));

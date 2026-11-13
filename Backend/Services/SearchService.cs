@@ -12,7 +12,8 @@ public record SearchHit(
     string? MatchedFile,
     DateTime SentAt,
     DateTime? Deadline,
-    bool IsCompleted);
+    bool IsCompleted,
+    string Kind = "homework");
 
 /// <summary>
 /// Full-text search over all tasks (old ones included): task text, subject name and attached file names.
@@ -45,6 +46,7 @@ public class SearchService
                 m.Text,
                 m.SentAt,
                 m.Deadline,
+                m.Kind,
                 Files = m.Attachments.Select(a => a.FileName).ToList(),
                 IsCompleted = _db.UserTaskProgresses.Any(p => p.MessageId == m.Id && p.UserId == userId && p.IsCompleted)
             })
@@ -60,7 +62,7 @@ public class SearchService
 
             var matchedFile = t.Files.FirstOrDefault(f => words.Any(w => Normalize(f).Contains(w, StringComparison.Ordinal)));
             hits.Add(new SearchHit(t.Id, t.ChatGroupId, t.GroupName, Snippet(text, words), matchedFile,
-                t.SentAt, t.Deadline, t.IsCompleted));
+                t.SentAt, t.Deadline, t.IsCompleted, t.Kind == Models.TaskKind.Lecture ? "lecture" : "homework"));
             if (hits.Count == MaxResults) break;
         }
         return hits;

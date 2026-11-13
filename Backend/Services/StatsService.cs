@@ -44,7 +44,9 @@ public class StatsService
         var students = await StudentsQuery().ToListAsync(ct);
         var studentIds = students.Select(s => s.TelegramId).ToHashSet();
 
+        // Lectures are material, not tasks: they are not part of the statistics
         var tasks = await _db.Messages.AsNoTracking()
+            .Where(m => m.Kind == TaskKind.Homework)
             .OrderByDescending(m => m.SentAt)
             .Select(m => new { m.Id, m.ChatGroupId, GroupName = m.Group != null ? m.Group.Name : "", m.Text, m.SentAt, m.Deadline })
             .ToListAsync(ct);
@@ -126,6 +128,7 @@ public class StatsService
             .ToListAsync(ct);
 
         var tasks = await _db.Messages.AsNoTracking()
+            .Where(m => m.Kind == TaskKind.Homework)
             .Select(m => new { m.Id, m.ChatGroupId, GroupName = m.Group != null ? m.Group.Name : "", m.Text, m.Deadline })
             .ToListAsync(ct);
 

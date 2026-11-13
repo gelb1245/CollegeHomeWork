@@ -90,6 +90,9 @@ namespace collegehomework.Migrations
                     b.Property<long>("FromUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("SentAt")
                         .HasColumnType("TEXT");
 

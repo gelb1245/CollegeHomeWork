@@ -514,15 +514,11 @@ function renderGroupsList(groups) {
     (g.description && g.description.toLowerCase().includes(query))
   );
 
-  // Apply group type filter (cosmetic — based on name keywords)
+  // "Лекции" / "Домашка": subjects that have entries of that kind
   if (currentGroupFilter === "lectures") {
-    filtered = filtered.filter((g) =>
-      /лекц|lecture/i.test(g.name + " " + (g.description || ""))
-    );
+    filtered = filtered.filter((g) => (g.lectureCount ?? 0) > 0);
   } else if (currentGroupFilter === "homework") {
-    filtered = filtered.filter((g) =>
-      /дз|домаш|задан|homework/i.test(g.name + " " + (g.description || ""))
-    );
+    filtered = filtered.filter((g) => (g.homeworkCount ?? 0) > 0);
   }
 
   groupsCounter.textContent = filtered.length;
@@ -531,7 +527,11 @@ function renderGroupsList(groups) {
   groupsScreen.classList.toggle("searching", searching);
   groupsScreen.classList.toggle("no-subject-hits", searching && filtered.length === 0);
   if (filtered.length === 0) {
-    groupsList.innerHTML = searching ? "" : '<div class="empty-state">Предметы не найдены.</div>';
+    const emptyText = query ? "Предметы не найдены."
+      : currentGroupFilter === "lectures" ? "Лекций пока нет."
+      : currentGroupFilter === "homework" ? "Домашних заданий пока нет."
+      : "Предметы не найдены.";
+    groupsList.innerHTML = searching ? "" : `<div class="empty-state">${emptyText}</div>`;
     return;
   }
 
@@ -542,8 +542,10 @@ function renderGroupsList(groups) {
 
     const subjectIcon = getSubjectIcon(g.name);
     // Message count badge (only if > 0)
-    const countBadgeHtml = g.messageCount > 0
-      ? `<span class="group-count-badge">${g.messageCount}</span>`
+    // On "Лекции" the badge counts lectures; otherwise homework not done yet
+    const badgeCount = currentGroupFilter === "lectures" ? g.lectureCount : g.messageCount;
+    const countBadgeHtml = badgeCount > 0
+      ? `<span class="group-count-badge ${currentGroupFilter === "lectures" ? "neutral" : ""}">${badgeCount}</span>`
       : "";
 
     item.innerHTML = `
@@ -557,7 +559,9 @@ function renderGroupsList(groups) {
         <span class="arrow-icon">${icon("chevronRight")}</span>
       </div>
     `;
-    item.addEventListener("click", () => openChat(g.id, g.name, g.description));
+    item.addEventListener("click", () => openChat(g.id, g.name, g.description, {
+      kind: { lectures: "lecture", homework: "homework" }[currentGroupFilter] || "all"
+    }));
     groupsList.appendChild(item);
   });
 }
@@ -579,6 +583,7 @@ async function openChat(groupId, name, desc, options = {}) {
   currentGroupId = groupId;
   currentGroupName = name;
   currentTaskFilter = "all";
+  setChatKind(options.kind || "all", false);
 
   chatFilterTabs.forEach((t) => t.classList.toggle("active", t.dataset.taskFilter === "all"));
 
@@ -670,8 +675,10 @@ async function loadMessages(groupId, silent = false, animate = {}) {
 
 // Update Task Progress
 function updateTaskProgress() {
-  const total = cachedMessages.length;
-  const completed = cachedMessages.filter((m) => m.isCompleted).length;
+  // Only homework has something to hand in
+  const homework = cachedMessages.filter((m) => m.kind !== "lecture");
+  const total = homework.length;
+  const completed = homework.filter((m) => m.isCompleted).length;
   const pending = total - completed;
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -694,14 +701,40 @@ chatFilterTabs.forEach((tab) => {
 });
 
 // Render messages with Markdown support
+let currentChatKind = "all"; // "all" | "homework" | "lecture"
+const chatKindTabs = document.querySelectorAll(".chat-kind-tab");
+const chatProgressCard = document.querySelector(".chat-progress-card");
+
+/** Switches the subject view between everything / homework / lectures. */
+function setChatKind(kind, rerender = true) {
+  currentChatKind = kind;
+  chatKindTabs.forEach((t) => t.classList.toggle("active", t.dataset.kind === kind));
+  // Lectures have nothing to hand in: hide the progress and "сдано" filters
+  chatProgressCard.classList.toggle("hidden", kind === "lecture");
+  if (kind === "lecture") {
+    currentTaskFilter = "all";
+    chatFilterTabs.forEach((t) => t.classList.toggle("active", t.dataset.taskFilter === "all"));
+  }
+  if (composer.editingId === null) setComposerKind(kind === "lecture" ? "lecture" : "homework");
+  if (rerender) renderFilteredMessages();
+}
+
+chatKindTabs.forEach((tab) => tab.addEventListener("click", () => setChatKind(tab.dataset.kind)));
+
 function filteredMessages() {
-  if (currentTaskFilter === "pending") return cachedMessages.filter((m) => !m.isCompleted);
-  if (currentTaskFilter === "completed") return cachedMessages.filter((m) => m.isCompleted);
-  return cachedMessages;
+  let list = cachedMessages;
+  if (currentChatKind === "homework") list = list.filter((m) => m.kind !== "lecture");
+  if (currentChatKind === "lecture") list = list.filter((m) => m.kind === "lecture");
+  // "Не сдано" / "Сдано" are about homework only
+  if (currentTaskFilter === "pending") return list.filter((m) => m.kind !== "lecture" && !m.isCompleted);
+  if (currentTaskFilter === "completed") return list.filter((m) => m.kind !== "lecture" && m.isCompleted);
+  return list;
 }
 
 function emptyMessagesHtml() {
-  let text = "Пока нет записей. Администратор ещё не опубликовал ДЗ.";
+  let text = currentChatKind === "lecture" ? "Лекций по этому предмету пока нет."
+    : currentChatKind === "homework" ? "Домашних заданий пока нет."
+    : "Пока нет записей. Администратор ещё не опубликовал ДЗ.";
   if (currentTaskFilter === "pending") text = "Все задания по этому предмету выполнены.";
   if (currentTaskFilter === "completed") text = "Пока нет выполненных заданий.";
   return `<div class="empty-state fade-in">${text}</div>`;
@@ -742,7 +775,8 @@ function toggleButtonHtml(isCompleted) {
 function createMessageCard(m) {
   const canManage = currentUser.role === "Developer" || currentUser.role === "Admin";
   const card = document.createElement("div");
-  card.className = `message-card ${m.isCompleted ? "completed" : ""}`;
+  const isLecture = m.kind === "lecture";
+  card.className = `message-card ${m.isCompleted ? "completed" : ""} ${isLecture ? "lecture" : ""}`;
   card.dataset.id = m.id;
 
   const date = new Date(m.sentAt);
@@ -756,7 +790,7 @@ function createMessageCard(m) {
 
   card.innerHTML = `
     <div class="message-card-header">
-      <span class="message-author">${escapeHtml(m.author)}</span>
+      <span class="message-author">${isLecture ? '<span class="kind-badge">📖 Лекция</span>' : ""}${escapeHtml(m.author)}</span>
       <div class="message-meta">
         <span class="message-date">${dateFormatted}, ${timeFormatted}${m.editedAt ? " · изменено" : ""}</span>
         ${canManage ? `
@@ -766,16 +800,18 @@ function createMessageCard(m) {
     </div>
     <div class="message-text">${textHtml}</div>
     ${renderAttachments(m.attachments)}
+    ${isLecture ? "" : `
     <div class="message-footer-row">
       <div class="footer-left">
         <div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>
         ${m.completedCount != null ? `<button type="button" class="done-count-chip" title="Кто сдал">${icon("users")}<span>${m.completedCount}/${m.studentsTotal}</span></button>` : ""}
       </div>
       <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}">${toggleButtonHtml(m.isCompleted)}</button>
-    </div>
+    </div>`}
   `;
 
-  card.querySelector(".task-toggle-btn").addEventListener("click", () => toggleTaskComplete(m.id));
+  // A lecture has no "Сдано" button and no deadline
+  card.querySelector(".task-toggle-btn")?.addEventListener("click", () => toggleTaskComplete(m.id));
   card.querySelector(".done-count-chip")?.addEventListener("click", () => openTaskProgressSheet(m.id));
   if (canManage) {
     card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
@@ -958,6 +994,7 @@ const editBanner = document.getElementById("editBanner");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
 
 let composer = {
+  kind: "homework",  // "homework" | "lecture"
   editingId: null,   // id of the task being edited, null = new task
   newFiles: [],      // File objects to upload: { file, previewUrl }
   existing: [],      // attachments already saved (edit mode)
@@ -966,21 +1003,44 @@ let composer = {
 
 function resetComposer() {
   composer.newFiles.forEach((f) => f.previewUrl && URL.revokeObjectURL(f.previewUrl));
-  composer = { editingId: null, newFiles: [], existing: [], removeIds: [] };
+  composer = { kind: currentChatKind === "lecture" ? "lecture" : "homework", editingId: null, newFiles: [], existing: [], removeIds: [] };
   adminMessageInput.value = "";
   if (adminDeadlineInput) adminDeadlineInput.value = "";
   if (deadlineContainer) deadlineContainer.classList.add("hidden");
   editBanner.classList.add("hidden");
   sendMessageBtn.innerHTML = `<svg class="ico" viewBox="0 0 24 24">${ICONS.send}</svg>`;
-  sendMessageBtn.title = "Опубликовать ДЗ";
+  sendMessageBtn.title = "Опубликовать";
   updateDeadlinePreview();
   renderComposerFiles();
+  setComposerKind(composer.kind);
 }
+
+const kindOptions = document.querySelectorAll(".kind-option");
+
+/** Homework or lecture: a lecture has no deadline, so the deadline button hides. */
+function setComposerKind(kind) {
+  composer.kind = kind;
+  kindOptions.forEach((o) => {
+    const on = o.dataset.kind === kind;
+    o.classList.toggle("active", on);
+    o.setAttribute("aria-checked", String(on));
+  });
+  const isLecture = kind === "lecture";
+  toggleDeadlineBtn.classList.toggle("hidden", isLecture);
+  if (isLecture) deadlineContainer.classList.add("hidden");
+  adminMessageInput.placeholder = isLecture ? "Новая лекция…" : "Новое задание…";
+}
+
+kindOptions.forEach((o) => o.addEventListener("click", () => {
+  window.Telegram?.WebApp?.HapticFeedback?.selectionChanged();
+  setComposerKind(o.dataset.kind);
+}));
 
 function startEdit(m) {
   resetComposer();
   composer.editingId = m.id;
   composer.existing = (m.attachments || []).slice();
+  setComposerKind(m.kind === "lecture" ? "lecture" : "homework");
   adminMessageInput.value = m.text || "";
   if (m.deadline && adminDeadlineInput) adminDeadlineInput.value = formatInputDateTime(new Date(m.deadline));
   editBanner.classList.remove("hidden");
@@ -1099,7 +1159,9 @@ sendMessageBtn.addEventListener("click", async () => {
 
   const form = new FormData();
   form.append("text", text);
-  form.append("deadline", adminDeadlineInput?.value ? new Date(adminDeadlineInput.value).toISOString() : "");
+  form.append("kind", composer.kind);
+  form.append("deadline", composer.kind !== "lecture" && adminDeadlineInput?.value
+    ? new Date(adminDeadlineInput.value).toISOString() : "");
   composer.newFiles.forEach((f) => form.append("files", f.file, f.file.name));
 
   const editing = composer.editingId !== null;
@@ -1980,7 +2042,9 @@ function renderTaskSearch(hits, q) {
   box.className = "deadline-section-items fade-in";
   hits.forEach((h) => {
     const deadline = h.deadline ? new Date(h.deadline) : null;
-    const side = h.isCompleted
+    const side = h.kind === "lecture"
+      ? '<span class="stats-row-sub">📖 лекция</span>'
+      : h.isCompleted
       ? '<span class="stats-row-sub ok">сдано</span>'
       : deadline
         ? `<span class="stats-row-sub ${deadline < now ? "bad" : ""}">${deadline < now ? "просрочено" : "до " + deadline.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>`
@@ -2120,6 +2184,8 @@ function refreshIndicators(animate = false) {
 
 setupSlidingIndicator(document.querySelector(".groups-filter-tabs"), ".groups-filter-tab");
 setupSlidingIndicator(document.querySelector(".chat-filter-tabs"), ".chat-filter-tab");
+setupSlidingIndicator(document.querySelector(".chat-kind-tabs"), ".chat-kind-tab");
+setupSlidingIndicator(document.querySelector(".kind-switch"), ".kind-option");
 setupSlidingIndicator(document.querySelector(".deadline-filter-tabs"), ".deadline-filter-tab");
 setupSlidingIndicator(document.querySelector(".users-tabs"), ".users-tab");
 setupSlidingIndicator(document.querySelector(".stats-view-tabs"), ".stats-view-tab");

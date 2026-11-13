@@ -116,6 +116,18 @@ public class SearchAndExportTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchReturnsKind_LecturesIncluded()
+    {
+        _db.Messages.Add(new Message { ChatGroupId = _db.ChatGroups.First().Id, FromUserId = Monitor,
+            Text = "Лекция про реформы", SentAt = Now, Kind = TaskKind.Lecture });
+        _db.SaveChanges();
+
+        var hits = await Search("реформы");
+        Assert.Equal("lecture", hits.Single().Kind);
+        Assert.Equal("homework", (await Search("карта")).Single().Kind);
+    }
+
+    [Fact]
     public void LongTextSnippet_IsCutAroundTheMatch()
     {
         var text = new string('а', 200) + " ИСКОМОЕ слово " + new string('б', 200);

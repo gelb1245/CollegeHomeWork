@@ -3,6 +3,16 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TelegramBotApi.Models
 {
+    /// <summary>
+    /// Homework — a task with optional deadline and a "Сдано" mark.
+    /// Lecture — study material: no deadline, nothing to hand in, not counted in statistics.
+    /// </summary>
+    public enum TaskKind
+    {
+        Homework = 0,
+        Lecture = 1
+    }
+
     public class Message
     {
         [Key]
@@ -22,6 +32,8 @@ namespace TelegramBotApi.Models
         public string Text { get; set; } = string.Empty;
 
         public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+        public TaskKind Kind { get; set; } = TaskKind.Homework;
 
         /// <summary>
         /// Optional deadline for homework submission.

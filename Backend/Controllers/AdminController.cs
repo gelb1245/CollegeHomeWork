@@ -9,7 +9,8 @@ using TelegramBotApi.Services;
 
 namespace TelegramBotApi.Controllers;
 
-public record GroupResponseDto(int Id, string Name, string? Description, int MessageCount);
+/// <summary>MessageCount — homework not yet done by the current user (the badge); plus totals by kind.</summary>
+public record GroupResponseDto(int Id, string Name, string? Description, int MessageCount, int HomeworkCount, int LectureCount);
 
 public record CreateGroupDto(
     [Required(ErrorMessage = "Имя группы обязательно")]
@@ -100,14 +101,23 @@ public class AdminController : ControllerBase
 
         // Badge count: tasks in the subject that the current user has not marked as completed yet
         var userId = CurrentUser.TelegramId;
-        var pendingByGroup = await _db.Messages.AsNoTracking()
-            .Where(m => !_db.UserTaskProgresses.Any(p => p.MessageId == m.Id && p.UserId == userId && p.IsCompleted))
+        var counts = await _db.Messages.AsNoTracking()
             .GroupBy(m => m.ChatGroupId)
-            .Select(g => new { GroupId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.GroupId, x => x.Count, cancellationToken);
+            .Select(g => new
+            {
+                GroupId = g.Key,
+                Pending = g.Count(m => m.Kind == TaskKind.Homework &&
+                    !_db.UserTaskProgresses.Any(p => p.MessageId == m.Id && p.UserId == userId && p.IsCompleted)),
+                Homework = g.Count(m => m.Kind == TaskKind.Homework),
+                Lectures = g.Count(m => m.Kind == TaskKind.Lecture)
+            })
+            .ToDictionaryAsync(x => x.GroupId, cancellationToken);
 
-        return Ok(groups.Select(g => new GroupResponseDto(
-            g.Id, g.Name, g.Description, pendingByGroup.GetValueOrDefault(g.Id))));
+        return Ok(groups.Select(g =>
+        {
+            counts.TryGetValue(g.Id, out var c);
+            return new GroupResponseDto(g.Id, g.Name, g.Description, c?.Pending ?? 0, c?.Homework ?? 0, c?.Lectures ?? 0);
+        }));
     }
 
     [HttpPost("group")]

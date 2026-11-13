@@ -21,6 +21,7 @@ public record MessageResponseDto(
     DateTime SentAt,
     DateTime? Deadline,
     DateTime? EditedAt,
+    string Kind, // "homework" | "lecture"
     bool IsCompleted,
     DateTime? CompletedAt,
     IReadOnlyList<AttachmentDto> Attachments,
@@ -36,7 +37,13 @@ public class HomeworkForm
     /// <summary>ISO 8601 date (UTC); empty string = no deadline.</summary>
     public string? Deadline { get; set; }
 
+    /// <summary>"homework" (default) or "lecture".</summary>
+    public string? Kind { get; set; }
+
     public List<IFormFile> Files { get; set; } = new();
+
+    public TaskKind ParsedKind =>
+        string.Equals(Kind, "lecture", StringComparison.OrdinalIgnoreCase) ? TaskKind.Lecture : TaskKind.Homework;
 }
 
 /// <summary>Form for editing a homework message.</summary>
@@ -108,6 +115,7 @@ public class HomeworkController : ControllerBase
                 m.SentAt,
                 m.Deadline,
                 m.EditedAt,
+                m.Kind,
                 Attachments = m.Attachments
                     .OrderBy(a => a.Id)
                     .Select(a => new { a.Id, a.FileName, a.ContentType, a.Size })
@@ -116,7 +124,7 @@ public class HomeworkController : ControllerBase
                     .Where(p => p.MessageId == m.Id && p.UserId == userId)
                     .Select(p => new { p.IsCompleted, p.CompletedAt })
                     .FirstOrDefault(),
-                CompletedCount = isPrivileged
+                CompletedCount = isPrivileged && m.Kind == TaskKind.Homework
                     ? _db.UserTaskProgresses.Count(p => p.MessageId == m.Id && p.IsCompleted &&
                         p.User != null && (p.User.Role == RoleType.User || p.User.Role == RoleType.Admin))
                     : 0
@@ -129,11 +137,13 @@ public class HomeworkController : ControllerBase
             .OrderBy(m => m.SentAt)
             .Select(m => new MessageResponseDto(
                 m.Id, m.ChatGroupId, m.FromUserId, m.Author, m.Text, m.SentAt, m.Deadline, m.EditedAt,
+                KindName(m.Kind),
                 m.Progress?.IsCompleted ?? false,
                 m.Progress?.CompletedAt,
                 m.Attachments.Select(a => ToDto(a.Id, a.FileName, a.ContentType, a.Size)).ToList(),
-                isPrivileged ? m.CompletedCount : null,
-                studentsTotal))
+                // Lectures have nothing to hand in — no "сдали X/N"
+                isPrivileged && m.Kind == TaskKind.Homework ? m.CompletedCount : null,
+                m.Kind == TaskKind.Homework ? studentsTotal : null))
             .ToList();
 
         return Ok(result);
@@ -161,7 +171,9 @@ public class HomeworkController : ControllerBase
             FromUserId = CurrentUser.TelegramId,
             Text = text!,
             SentAt = DateTime.UtcNow,
-            Deadline = deadline
+            Kind = form.ParsedKind,
+            // A lecture is material, not a task: it has no deadline
+            Deadline = form.ParsedKind == TaskKind.Lecture ? null : deadline
         };
 
         // Files are stored first: if Telegram rejects one, nothing is published
@@ -179,7 +191,7 @@ public class HomeworkController : ControllerBase
         {
             try
             {
-                await _notifications.NotifyStudentsAsync(msg.Id, group.Id, group.Name, msg.Text, msg.Deadline, authorId, attachmentCount);
+                await _notifications.NotifyStudentsAsync(msg.Id, group.Id, group.Name, msg.Text, msg.Deadline, authorId, attachmentCount, msg.Kind);
             }
             catch (Exception ex)
             {
@@ -216,7 +228,8 @@ public class HomeworkController : ControllerBase
         if (uploaded.Error != null) return StatusCode(StatusCodes.Status502BadGateway, new { error = uploaded.Error });
 
         msg.Text = text!;
-        msg.Deadline = deadline;
+        msg.Kind = form.ParsedKind;
+        msg.Deadline = msg.Kind == TaskKind.Lecture ? null : deadline;
         msg.EditedAt = DateTime.UtcNow;
         _db.Attachments.RemoveRange(toRemove);
         msg.Attachments.AddRange(uploaded.Attachments);
@@ -248,8 +261,9 @@ public class HomeworkController : ControllerBase
     {
         if (id <= 0) return BadRequest("Некорректный ID сообщения.");
 
-        var messageExists = await _db.Messages.AnyAsync(m => m.Id == id, cancellationToken);
-        if (!messageExists) return NotFound("Задание не найдено.");
+        var kind = await _db.Messages.Where(m => m.Id == id).Select(m => (TaskKind?)m.Kind).FirstOrDefaultAsync(cancellationToken);
+        if (kind == null) return NotFound("Задание не найдено.");
+        if (kind == TaskKind.Lecture) return BadRequest(new { error = "У лекции нет отметки «Сдано»." });
 
         var userId = CurrentUser.TelegramId;
         var progress = await _db.UserTaskProgresses
@@ -278,7 +292,7 @@ public class HomeworkController : ControllerBase
 
         var result = await _db.Messages
             .AsNoTracking()
-            .Where(m => m.Deadline != null)
+            .Where(m => m.Deadline != null && m.Kind == TaskKind.Homework)
             .OrderBy(m => m.Deadline)
             .Select(m => new
             {
@@ -300,6 +314,8 @@ public class HomeworkController : ControllerBase
     }
 
     // ---------- helpers ----------
+
+    public static string KindName(TaskKind kind) => kind == TaskKind.Lecture ? "lecture" : "homework";
 
     private AttachmentDto ToDto(int id, string fileName, string contentType, long size) =>
         new(id, fileName, contentType, size, AttachmentStorage.IsImage(contentType), _signer.CreateUrl(id));

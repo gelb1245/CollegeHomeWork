@@ -2166,6 +2166,89 @@ mark {
 #exportStatus.visible { min-height: 18px; }
 
 /* ============================================
+   TASK KIND: homework / lecture
+   ============================================ */
+.chat-kind-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--seg-bg);
+  border: 1px solid var(--field-border);
+  margin-bottom: 10px;
+  position: relative;
+}
+.chat-kind-tab {
+  flex: 1;
+  height: 28px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 9px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s, transform 0.12s;
+}
+.chat-kind-tab.active { color: var(--seg-active-text); font-weight: 600; }
+.chat-kind-tab:active { transform: scale(0.94); }
+.chat-kind-tabs .slide-indicator { border-radius: 9px; }
+.has-indicator .chat-kind-tab.active { background: transparent; box-shadow: none; }
+
+/* Composer: kind switch next to the deadline button */
+.composer-top-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.kind-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  position: relative;
+}
+.kind-option {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s, transform 0.12s;
+}
+.kind-option.active { color: var(--seg-active-text); }
+.kind-option:active { transform: scale(0.94); }
+.kind-switch .slide-indicator { border-radius: 999px; }
+.has-indicator .kind-option.active { background: transparent; box-shadow: none; }
+
+/* Lecture card: a quiet label instead of deadline and "Сдано" */
+.kind-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  color: var(--text-primary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.message-card.lecture .message-text { margin-bottom: 0; }
+.message-card.lecture .message-attachments { margin: 8px 0 0; }
+
+/* Lecture count on the subjects screen — informational, not "to do" */
+.group-count-badge.neutral {
+  background: var(--field-bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--field-border);
+}
+
+/* ============================================
    MOTION — short, transform/opacity only (fast on low-end phones)
    ============================================ */
 

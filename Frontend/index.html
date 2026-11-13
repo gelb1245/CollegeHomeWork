@@ -117,6 +117,13 @@
           </div>
         </div>
 
+        <!-- Kind filter: everything / homework / lectures -->
+        <div class="chat-kind-tabs">
+          <button class="chat-kind-tab active" data-kind="all">Всё</button>
+          <button class="chat-kind-tab" data-kind="homework">ДЗ</button>
+          <button class="chat-kind-tab" data-kind="lecture">Лекции</button>
+        </div>
+
         <!-- Task Progress & Filter -->
         <div class="chat-progress-card">
           <div class="progress-info">
@@ -145,7 +152,13 @@
             <button type="button" id="cancelEditBtn" class="edit-cancel-btn">Отмена</button>
           </div>
           <div class="deadline-toggle-bar">
-            <button type="button" id="toggleDeadlineBtn" class="pill-btn">Дедлайн: <span id="deadlinePreview">Без срока</span></button>
+            <div class="composer-top-row">
+              <div class="kind-switch" role="radiogroup" aria-label="Тип записи">
+                <button type="button" class="kind-option active" data-kind="homework" role="radio" aria-checked="true">📝 ДЗ</button>
+                <button type="button" class="kind-option" data-kind="lecture" role="radio" aria-checked="false">📖 Лекция</button>
+              </div>
+              <button type="button" id="toggleDeadlineBtn" class="pill-btn">Дедлайн: <span id="deadlinePreview">Без срока</span></button>
+            </div>
             <div id="deadlineContainer" class="deadline-picker-container hidden">
               <input type="datetime-local" id="adminDeadlineInput" class="deadline-input" />
               <div class="deadline-presets">

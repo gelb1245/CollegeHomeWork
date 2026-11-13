@@ -101,6 +101,9 @@ namespace collegehomework.Migrations.Postgres
                     b.Property<long>("FromUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("SentAt")
                         .HasColumnType("timestamp without time zone");
 
