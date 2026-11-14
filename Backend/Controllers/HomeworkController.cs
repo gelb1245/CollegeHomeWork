@@ -25,6 +25,8 @@ public record MessageResponseDto(
     bool IsCompleted,
     DateTime? CompletedAt,
     IReadOnlyList<AttachmentDto> Attachments,
+    bool IsPinned,
+    int CommentCount,
     // Only for Admin/Developer: how many students marked the task as done, out of how many
     int? CompletedCount = null,
     int? StudentsTotal = null);
@@ -116,6 +118,8 @@ public class HomeworkController : ControllerBase
                 m.Deadline,
                 m.EditedAt,
                 m.Kind,
+                m.IsPinned,
+                CommentCount = m.Comments.Count,
                 Attachments = m.Attachments
                     .OrderBy(a => a.Id)
                     .Select(a => new { a.Id, a.FileName, a.ContentType, a.Size })
@@ -141,6 +145,8 @@ public class HomeworkController : ControllerBase
                 m.Progress?.IsCompleted ?? false,
                 m.Progress?.CompletedAt,
                 m.Attachments.Select(a => ToDto(a.Id, a.FileName, a.ContentType, a.Size)).ToList(),
+                m.IsPinned,
+                m.CommentCount,
                 // Lectures have nothing to hand in — no "сдали X/N"
                 isPrivileged && m.Kind == TaskKind.Homework ? m.CompletedCount : null,
                 m.Kind == TaskKind.Homework ? studentsTotal : null))
@@ -227,9 +233,16 @@ public class HomeworkController : ControllerBase
         var uploaded = await UploadFilesAsync(form.Files, msg.Group?.Name ?? "", cancellationToken);
         if (uploaded.Error != null) return StatusCode(StatusCodes.Status502BadGateway, new { error = uploaded.Error });
 
+        var newDeadline = form.ParsedKind == TaskKind.Lecture ? null : deadline;
+        if (newDeadline != msg.Deadline)
+        {
+            // Deadline moved: reminders are planned anew for the new date
+            await _db.DeadlineReminders.Where(r => r.MessageId == msg.Id).ExecuteDeleteAsync(cancellationToken);
+        }
+
         msg.Text = text!;
         msg.Kind = form.ParsedKind;
-        msg.Deadline = msg.Kind == TaskKind.Lecture ? null : deadline;
+        msg.Deadline = newDeadline;
         msg.EditedAt = DateTime.UtcNow;
         _db.Attachments.RemoveRange(toRemove);
         msg.Attachments.AddRange(uploaded.Attachments);
@@ -254,6 +267,51 @@ public class HomeworkController : ControllerBase
         await _notifications.DeleteNotificationsForHomeworkAsync(id, cancellationToken);
 
         return NoContent();
+    }
+
+    /// <summary>Pins or unpins an entry: pinned ones are shown at the top of the subject.</summary>
+    [HttpPost("message/{id}/pin")]
+    [TelegramAuthorize(RoleType.Admin, RoleType.Developer)]
+    public async Task<IActionResult> TogglePin(int id, CancellationToken cancellationToken)
+    {
+        var msg = await _db.Messages.FindAsync(new object[] { id }, cancellationToken);
+        if (msg == null) return NotFound(new { error = "Задание не найдено." });
+        msg.IsPinned = !msg.IsPinned;
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { msg.Id, msg.IsPinned });
+    }
+
+    /// <summary>
+    /// Sends the notification again (e.g. after moving the deadline): the old messages are removed
+    /// from the chats first, so students do not see two versions.
+    /// </summary>
+    [HttpPost("message/{id}/renotify")]
+    [TelegramAuthorize(RoleType.Admin, RoleType.Developer)]
+    public async Task<IActionResult> Renotify(int id, CancellationToken cancellationToken)
+    {
+        var msg = await _db.Messages.AsNoTracking().Include(m => m.Group)
+            .Select(m => new { m.Id, m.ChatGroupId, GroupName = m.Group != null ? m.Group.Name : "", m.Text, m.Deadline, m.Kind,
+                Files = m.Attachments.Count })
+            .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+        if (msg == null) return NotFound(new { error = "Задание не найдено." });
+        if (msg.Deadline is { } dl && dl <= DateTime.UtcNow)
+            return BadRequest(new { error = "Срок уже прошёл. Сначала перенесите дедлайн." });
+
+        var authorId = CurrentUser.TelegramId;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _notifications.DeleteNotificationsForHomeworkAsync(msg.Id);
+                await _notifications.NotifyStudentsAsync(msg.Id, msg.ChatGroupId, msg.GroupName, msg.Text, msg.Deadline,
+                    authorId, msg.Files, msg.Kind, isRepeat: true);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Ошибка при повторной рассылке #{Id}", msg.Id);
+            }
+        });
+        return Accepted(new { msg.Id });
     }
 
     [HttpPost("message/{id}/toggle-complete")]

@@ -53,6 +53,7 @@ public class HomeworkNotificationService
         long authorTelegramId,
         int attachmentCount = 0,
         TaskKind kind = TaskKind.Homework,
+        bool isRepeat = false,
         CancellationToken cancellationToken = default)
     {
         var targetUsers = _whitelist.GetAll();
@@ -61,7 +62,9 @@ public class HomeworkNotificationService
         var replyMarkup = Bot.MiniAppLink.Button(_config, "📱 Открыть задание в Mini App");
 
         var sb = new StringBuilder();
-        sb.AppendLine(kind == TaskKind.Lecture ? "📖 *Новая лекция*" : "🔔 *Новое домашнее задание!*");
+        sb.AppendLine(isRepeat
+            ? (kind == TaskKind.Lecture ? "🔁 *Напоминание о лекции*" : "🔁 *Напоминание о задании*")
+            : (kind == TaskKind.Lecture ? "📖 *Новая лекция*" : "🔔 *Новое домашнее задание!*"));
         sb.AppendLine($"📚 Предмет: *{EscapeMarkdown(subjectName)}*\n");
 
         if (deadline.HasValue)

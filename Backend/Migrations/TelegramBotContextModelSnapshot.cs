@@ -72,6 +72,63 @@ namespace collegehomework.Migrations
                     b.ToTable("ChatGroups");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.DeadlineReminder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Stage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId", "UserId", "Stage")
+                        .IsUnique();
+
+                    b.ToTable("DeadlineReminders");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.Lesson", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChatGroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EndMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Room")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StartMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatGroupId");
+
+                    b.HasIndex("DayOfWeek", "StartMinutes");
+
+                    b.ToTable("Lessons");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
                 {
                     b.Property<int>("Id")
@@ -88,6 +145,9 @@ namespace collegehomework.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("FromUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsPinned")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Kind")
@@ -130,6 +190,9 @@ namespace collegehomework.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AutoDelete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DeadlineReminders")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("NewTasks")
@@ -180,6 +243,35 @@ namespace collegehomework.Migrations
                     b.HasIndex("IsDeleted", "DeleteAt");
 
                     b.ToTable("SentNotifications");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.TaskComment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("MessageId", "CreatedAt");
+
+                    b.ToTable("TaskComments");
                 });
 
             modelBuilder.Entity("TelegramBotApi.Models.User", b =>
@@ -234,6 +326,19 @@ namespace collegehomework.Migrations
                     b.ToTable("UserTaskProgresses");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.WhitelistEntry", b =>
+                {
+                    b.Property<long>("TelegramId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TelegramId");
+
+                    b.ToTable("WhitelistEntries");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.Attachment", b =>
                 {
                     b.HasOne("TelegramBotApi.Models.Message", "Message")
@@ -243,6 +348,28 @@ namespace collegehomework.Migrations
                         .IsRequired();
 
                     b.Navigation("Message");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.DeadlineReminder", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.Message", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
+            modelBuilder.Entity("TelegramBotApi.Models.Lesson", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.ChatGroup", "Group")
+                        .WithMany()
+                        .HasForeignKey("ChatGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Group");
                 });
 
             modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
@@ -294,6 +421,25 @@ namespace collegehomework.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("TelegramBotApi.Models.TaskComment", b =>
+                {
+                    b.HasOne("TelegramBotApi.Models.Message", "Message")
+                        .WithMany("Comments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TelegramBotApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("TelegramBotApi.Models.UserTaskProgress", b =>
                 {
                     b.HasOne("TelegramBotApi.Models.Message", "Message")
@@ -316,6 +462,8 @@ namespace collegehomework.Migrations
             modelBuilder.Entity("TelegramBotApi.Models.Message", b =>
                 {
                     b.Navigation("Attachments");
+
+                    b.Navigation("Comments");
                 });
 #pragma warning restore 612, 618
         }

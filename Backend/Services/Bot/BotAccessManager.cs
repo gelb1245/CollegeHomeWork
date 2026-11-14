@@ -84,7 +84,7 @@ public class BotAccessManager
             return;
         }
 
-        _whitelist.Add(newUserId);
+        await _whitelist.AddAsync(newUserId, ct);
 
         var existing = await db.Users.FindAsync(new object[] { newUserId }, ct);
         if (existing == null)
@@ -116,7 +116,7 @@ public class BotAccessManager
     /// <summary>An admin forwarded someone's message: add the original sender to the whitelist.</summary>
     public async Task HandleForwardedAsync(TelegramBotContext db, long adminId, Telegram.Bot.Types.User forwardFrom, CancellationToken ct)
     {
-        _whitelist.Add(forwardFrom.Id);
+        await _whitelist.AddAsync(forwardFrom.Id, ct);
 
         if (await db.Users.FindAsync(new object[] { forwardFrom.Id }, ct) == null)
         {
@@ -174,7 +174,7 @@ public class BotAccessManager
 
     private async Task AddToWhitelistAsync(TelegramBotContext db, long adminId, long targetId, RoleType role, CancellationToken ct)
     {
-        _whitelist.Add(targetId);
+        await _whitelist.AddAsync(targetId, ct);
 
         var target = await db.Users.FindAsync(new object[] { targetId }, ct);
         if (target == null) db.Users.Add(new AppUser { TelegramId = targetId, Username = $"User_{targetId}", Role = role });
@@ -224,7 +224,7 @@ public class BotAccessManager
             return;
         }
 
-        _whitelist.Remove(targetId);
+        await _whitelist.RemoveAsync(targetId, ct);
         var target = await db.Users.FindAsync(new object[] { targetId }, ct);
         if (target != null)
         {

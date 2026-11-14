@@ -25,6 +25,10 @@ namespace TelegramBotApi.Data
         public DbSet<Attachment> Attachments => Set<Attachment>();
         public DbSet<NotificationSettings> NotificationSettings => Set<NotificationSettings>();
         public DbSet<MutedSubject> MutedSubjects => Set<MutedSubject>();
+        public DbSet<WhitelistEntry> WhitelistEntries => Set<WhitelistEntry>();
+        public DbSet<DeadlineReminder> DeadlineReminders => Set<DeadlineReminder>();
+        public DbSet<Lesson> Lessons => Set<Lesson>();
+        public DbSet<TaskComment> TaskComments => Set<TaskComment>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -41,6 +45,14 @@ namespace TelegramBotApi.Data
                 .HasIndex(n => n.HomeworkMessageId);
 
             modelBuilder.Entity<MutedSubject>().HasKey(m => new { m.UserId, m.ChatGroupId });
+
+            modelBuilder.Entity<DeadlineReminder>()
+                .HasIndex(r => new { r.MessageId, r.UserId, r.Stage })
+                .IsUnique();
+
+            modelBuilder.Entity<Lesson>().HasIndex(l => new { l.DayOfWeek, l.StartMinutes });
+
+            modelBuilder.Entity<TaskComment>().HasIndex(c => new { c.MessageId, c.CreatedAt });
 
             // All times are stored in UTC, but SQLite/PostgreSQL ("timestamp without time zone") return them
             // with DateTimeKind.Unspecified. Then JSON has no "Z" and the browser treats UTC as local time

@@ -15,6 +15,7 @@ public record SubjectMuteDto(int Id, string Name, bool Muted);
 
 public record NotificationSettingsDto(
     bool NewTasks,
+    bool DeadlineReminders,
     bool AutoDelete,
     bool QuietHoursEnabled,
     string QuietFrom,
@@ -27,7 +28,8 @@ public record UpdateNotificationSettingsDto(
     bool QuietHoursEnabled,
     string QuietFrom,
     string QuietTo,
-    List<int>? MutedSubjectIds);
+    List<int>? MutedSubjectIds,
+    bool DeadlineReminders = true);
 
 /// <summary>
 /// Personal notification settings of the current user (any role).
@@ -74,6 +76,7 @@ public class NotificationSettingsController : ControllerBase
             _db.NotificationSettings.Add(settings);
         }
         settings.NewTasks = dto.NewTasks;
+        settings.DeadlineReminders = dto.DeadlineReminders;
         settings.AutoDelete = dto.AutoDelete;
         settings.QuietHoursEnabled = dto.QuietHoursEnabled;
         settings.QuietFromMinutes = from;
@@ -130,7 +133,7 @@ public class NotificationSettingsController : ControllerBase
             .Select(g => new { g.Id, g.Name }).ToListAsync(ct);
 
         return new NotificationSettingsDto(
-            s.NewTasks, s.AutoDelete, s.QuietHoursEnabled,
+            s.NewTasks, s.DeadlineReminders, s.AutoDelete, s.QuietHoursEnabled,
             NotificationPolicy.FormatMinutes(s.QuietFromMinutes),
             NotificationPolicy.FormatMinutes(s.QuietToMinutes),
             subjects.Select(g => new SubjectMuteDto(g.Id, g.Name, muted.Contains(g.Id))).ToList());

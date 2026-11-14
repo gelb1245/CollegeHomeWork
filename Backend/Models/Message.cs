@@ -45,6 +45,11 @@ namespace TelegramBotApi.Models
         /// </summary>
         public DateTime? EditedAt { get; set; }
 
+        /// <summary>Pinned entries are shown at the top of the subject.</summary>
+        public bool IsPinned { get; set; }
+
         public List<Attachment> Attachments { get; set; } = new();
+
+        public List<TaskComment> Comments { get; set; } = new();
     }
 }

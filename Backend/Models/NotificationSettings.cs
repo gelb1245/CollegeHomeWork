@@ -18,6 +18,9 @@ public class NotificationSettings
     /// <summary>Receive a message when a new task is published.</summary>
     public bool NewTasks { get; set; } = true;
 
+    /// <summary>Remind about unfinished homework a day and two hours before the deadline.</summary>
+    public bool DeadlineReminders { get; set; } = true;
+
     /// <summary>Delete the notification from the chat after 24 hours.</summary>
     public bool AutoDelete { get; set; } = true;
 

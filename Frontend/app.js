@@ -26,6 +26,13 @@ let currentGroupFilter = "all"; // "all" | "lectures" | "homework"
 
 // Line icons (stroke SVG, Lucide-style)
 const ICONS = {
+  pin: '<path d="M12 17v5"/><path d="M9 10.8V5h6v5.8l2.5 3.2H6.5z"/><path d="M8 5h8"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/>',
+  archive: '<rect x="2.5" y="3.5" width="19" height="5" rx="1.5"/><path d="M4.5 8.5V19a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/>',
+  message: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   landmark: '<path d="M3 21h18"/><path d="M5 21V10"/><path d="M19 21V10"/><path d="M9 21v-6a3 3 0 0 1 6 0v6"/><path d="M3 10 12 4l9 6"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 0 0 18 14 14 0 0 0 0-18"/><path d="M3 12h18"/>',
   check: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
@@ -94,9 +101,35 @@ async function apiFetch(path, options = {}) {
   // FormData (file uploads) sets its own multipart Content-Type with boundary
   if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
   if (initData) headers["Authorization"] = `Bearer ${initData}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  return res;
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    setOffline(false);
+    return res;
+  } catch (err) {
+    setOffline(true); // network error: no answer from the server at all
+    throw err;
+  }
 }
+
+// ============================================================
+// OFFLINE — screens keep the last saved data, a banner says so
+// ============================================================
+const offlineBanner = document.getElementById("offlineBanner");
+let isOffline = false;
+
+function setOffline(value) {
+  if (value === isOffline) return;
+  isOffline = value;
+  offlineBanner.classList.toggle("hidden", !value);
+  // Back online: fetch fresh data for the open screen
+  if (!value && currentUser.isAuthorized) refreshCurrentScreen();
+}
+
+window.addEventListener("offline", () => setOffline(true));
+window.addEventListener("online", () => {
+  // The event only means "a network exists" — the next request decides
+  if (currentUser.isAuthorized) refreshCurrentScreen();
+});
 
 // ============================================================
 // THEME
@@ -252,6 +285,12 @@ async function initApp() {
     }
   } catch (err) {
     console.error("Init failed:", err);
+    // No network, but we know this user: keep the saved subjects instead of a "denied" screen
+    if (currentUser.isAuthorized) {
+      setOffline(true);
+      restoreTodayFromCache();
+      return;
+    }
     showAccessDenied(fallbackId, "Не удалось подключиться к серверу.");
   }
 }
@@ -436,7 +475,11 @@ function writeCache(key, value) {
 }
 
 function clearCache() {
-  try { ["cache-user", "cache-groups"].forEach((k) => localStorage.removeItem(k)); } catch {}
+  try {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("cache-"))
+      .forEach((k) => localStorage.removeItem(k));
+  } catch {}
 }
 
 function restoreFromCache() {
@@ -460,6 +503,7 @@ async function loadGroups(prefetchedGroups = null, prefetchedDeadlines = null) {
     cachedGroups = await res.json();
     writeCache("cache-groups", cachedGroups);
     renderGroupsList(cachedGroups);
+    loadToday();
     if (groupSearchInput.value.trim().length >= 2) scheduleTaskSearch(0);
     await loadDeadlinesSummary(prefetchedDeadlines);
   } catch (err) {
@@ -660,16 +704,34 @@ function formatInputDateTime(date) {
 
 // Load Messages
 async function loadMessages(groupId, silent = false, animate = {}) {
+  const cacheKey = `cache-msgs-${groupId}`;
+  let shownFromCache = false;
   // silent: refresh in place (pull-to-refresh, after saving) without flashing a loader
-  if (!silent) messagesContainer.innerHTML = skeleton("message", 2);
+  if (!silent) {
+    const cached = readCache(cacheKey);
+    if (Array.isArray(cached)) {
+      cachedMessages = cached;
+      updateTaskProgress();
+      renderFilteredMessages();
+      shownFromCache = true;
+    } else {
+      messagesContainer.innerHTML = skeleton("message", 2);
+    }
+  }
   try {
     const res = await apiFetch(`/admin/group/${groupId}/messages`);
-    cachedMessages = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const fresh = await res.json();
+    if (groupId !== currentGroupId) return; // the user already left this subject
+    cachedMessages = fresh;
+    writeCache(cacheKey, fresh);
     updateTaskProgress();
     renderFilteredMessages(animate);
   } catch (err) {
     console.error(err);
-    messagesContainer.innerHTML = '<div class="empty-state">Ошибка загрузки заданий</div>';
+    if (!shownFromCache && !silent) {
+      messagesContainer.innerHTML = '<div class="empty-state">Не удалось загрузить задания. Потяните вниз, чтобы повторить.</div>';
+    }
   }
 }
 
@@ -726,9 +788,23 @@ function filteredMessages() {
   if (currentChatKind === "homework") list = list.filter((m) => m.kind !== "lecture");
   if (currentChatKind === "lecture") list = list.filter((m) => m.kind === "lecture");
   // "Не сдано" / "Сдано" are about homework only
-  if (currentTaskFilter === "pending") return list.filter((m) => m.kind !== "lecture" && !m.isCompleted);
-  if (currentTaskFilter === "completed") return list.filter((m) => m.kind !== "lecture" && m.isCompleted);
-  return list;
+  if (currentTaskFilter === "pending") list = list.filter((m) => m.kind !== "lecture" && !m.isCompleted);
+  if (currentTaskFilter === "completed") list = list.filter((m) => m.kind !== "lecture" && m.isCompleted);
+  // Pinned entries first, the rest keep their order (oldest → newest)
+  return [...list.filter((m) => m.isPinned), ...list.filter((m) => !m.isPinned)];
+}
+
+// ---------- Archive: old finished entries are folded away under the list ----------
+const ARCHIVE_AFTER_DAYS = { done: 3, lecture: 30, overdue: 30 };
+let archiveOpen = false;
+
+/** Handed in a while ago, an old lecture or long overdue — kept, but out of the way. */
+function isArchived(m, now = Date.now()) {
+  if (m.isPinned) return false;
+  const daysSince = (date) => (now - new Date(date).getTime()) / DAY_MS;
+  if (m.kind === "lecture") return daysSince(m.sentAt) > ARCHIVE_AFTER_DAYS.lecture;
+  if (m.isCompleted) return daysSince(m.deadline || m.completedAt || m.sentAt) > ARCHIVE_AFTER_DAYS.done;
+  return m.deadline != null && daysSince(m.deadline) > ARCHIVE_AFTER_DAYS.overdue;
 }
 
 function emptyMessagesHtml() {
@@ -754,13 +830,42 @@ function renderFilteredMessages(animate = {}) {
   // Markdown: line breaks and GitHub syntax
   if (typeof marked !== "undefined") marked.setOptions({ breaks: true, gfm: true });
 
-  messagesContainer.innerHTML = "";
-  list.forEach((m) => {
+  // The archive applies to the "everything" view; "Сдано" shows all handed-in tasks
+  const highlightIds = [...(animate.enter || []), ...(animate.flash || [])];
+  const useArchive = currentTaskFilter === "all";
+  const archived = useArchive ? list.filter((m) => isArchived(m) && !highlightIds.includes(m.id)) : [];
+  const active = list.filter((m) => !archived.includes(m));
+
+  const addCard = (parent, m) => {
     const card = createMessageCard(m);
     if (animate.enter?.includes(m.id)) card.classList.add("card-enter");
     if (animate.flash?.includes(m.id)) card.classList.add("card-flash");
-    messagesContainer.appendChild(card);
-  });
+    parent.appendChild(card);
+  };
+
+  messagesContainer.innerHTML = "";
+  if (active.length === 0) {
+    messagesContainer.insertAdjacentHTML("beforeend",
+      '<div class="empty-state fade-in">Актуальных записей нет — всё старое в архиве.</div>');
+  }
+  active.forEach((m) => addCard(messagesContainer, m));
+
+  if (archived.length > 0) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = `archive-toggle ${archiveOpen ? "open" : ""}`;
+    toggle.innerHTML = `${icon("archive")}<span>Архив · ${archived.length}</span>${icon("chevronRight")}`;
+    const box = document.createElement("div");
+    box.className = `archive-list ${archiveOpen ? "" : "hidden"}`;
+    archived.forEach((m) => addCard(box, m));
+    toggle.addEventListener("click", () => {
+      archiveOpen = !archiveOpen;
+      toggle.classList.toggle("open", archiveOpen);
+      box.classList.toggle("hidden", !archiveOpen);
+      if (archiveOpen) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    messagesContainer.append(toggle, box);
+  }
 
   const highlighted = messagesContainer.querySelector(".card-enter, .card-flash");
   highlighted?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -776,7 +881,7 @@ function createMessageCard(m) {
   const canManage = currentUser.role === "Developer" || currentUser.role === "Admin";
   const card = document.createElement("div");
   const isLecture = m.kind === "lecture";
-  card.className = `message-card ${m.isCompleted ? "completed" : ""} ${isLecture ? "lecture" : ""}`;
+  card.className = `message-card ${m.isCompleted ? "completed" : ""} ${isLecture ? "lecture" : ""} ${m.isPinned ? "pinned" : ""}`;
   card.dataset.id = m.id;
 
   const date = new Date(m.sentAt);
@@ -790,35 +895,181 @@ function createMessageCard(m) {
 
   card.innerHTML = `
     <div class="message-card-header">
-      <span class="message-author">${isLecture ? '<span class="kind-badge">📖 Лекция</span>' : ""}${escapeHtml(m.author)}</span>
+      <span class="message-author">${m.isPinned ? `<span class="pin-badge" title="Закреплено">${icon("pin")}</span>` : ""}${isLecture ? '<span class="kind-badge">📖 Лекция</span>' : ""}${escapeHtml(m.author)}</span>
       <div class="message-meta">
         <span class="message-date">${dateFormatted}, ${timeFormatted}${m.editedAt ? " · изменено" : ""}</span>
         ${canManage ? `
-          <button class="msg-action-btn edit-msg-btn" title="Редактировать">${icon("pencil")}</button>
-          <button class="msg-action-btn delete-msg-btn" title="Удалить запись">${icon("close")}</button>` : ""}
+          <button class="msg-action-btn more-msg-btn" title="Действия">${icon("more")}</button>` : ""}
       </div>
     </div>
     <div class="message-text">${textHtml}</div>
     ${renderAttachments(m.attachments)}
-    ${isLecture ? "" : `
     <div class="message-footer-row">
       <div class="footer-left">
-        <div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>
-        ${m.completedCount != null ? `<button type="button" class="done-count-chip" title="Кто сдал">${icon("users")}<span>${m.completedCount}/${m.studentsTotal}</span></button>` : ""}
+        ${isLecture ? "" : `<div class="deadline-slot">${formatDeadlineBadge(m.deadline, m.isCompleted)}</div>`}
+        ${!isLecture && m.completedCount != null ? `<button type="button" class="done-count-chip" title="Кто сдал">${icon("users")}<span>${m.completedCount}/${m.studentsTotal}</span></button>` : ""}
+        <button type="button" class="done-count-chip comments-chip" title="Вопросы по заданию">${commentsChipHtml(m.commentCount)}</button>
       </div>
-      <button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}">${toggleButtonHtml(m.isCompleted)}</button>
-    </div>`}
+      ${isLecture ? "" : `<button class="task-toggle-btn ${m.isCompleted ? "completed" : ""}">${toggleButtonHtml(m.isCompleted)}</button>`}
+    </div>
   `;
 
   // A lecture has no "Сдано" button and no deadline
   card.querySelector(".task-toggle-btn")?.addEventListener("click", () => toggleTaskComplete(m.id));
-  card.querySelector(".done-count-chip")?.addEventListener("click", () => openTaskProgressSheet(m.id));
-  if (canManage) {
-    card.querySelector(".delete-msg-btn")?.addEventListener("click", () => deleteMessage(m.id));
-    card.querySelector(".edit-msg-btn")?.addEventListener("click", () => startEdit(m));
-  }
+  card.querySelector(".done-count-chip:not(.comments-chip)")?.addEventListener("click", () => openTaskProgressSheet(m.id));
+  card.querySelector(".comments-chip").addEventListener("click", () => openCommentsSheet(m));
+  if (canManage) card.querySelector(".more-msg-btn")?.addEventListener("click", () => openTaskActions(m));
   bindAttachmentHandlers(card);
   return card;
+}
+
+function commentsChipHtml(count) {
+  return count ? `${icon("message")}<span>${count}</span>` : icon("message");
+}
+
+/** Edit / pin / notify again / delete — one compact menu instead of four tiny buttons. */
+function openTaskActions(m) {
+  const isLecture = m.kind === "lecture";
+  const actions = [
+    { id: "edit", icon: "pencil", title: "Редактировать" },
+    { id: "pin", icon: "pin", title: m.isPinned ? "Открепить" : "Закрепить наверху" },
+    { id: "renotify", icon: "repeat", title: "Напомнить всем ещё раз", sub: "Старое уведомление удалится, придёт новое" },
+    { id: "delete", icon: "trash", title: "Удалить", danger: true }
+  ];
+  openSheet(isLecture ? "Лекция" : "Задание", plainPreview(m.text).slice(0, 80), `
+    <div class="sheet-people action-list">
+      ${actions.map((a) => `
+        <button type="button" class="sheet-person action-row ${a.danger ? "danger" : ""}" data-action="${a.id}">
+          ${icon(a.icon)}
+          <span class="action-text"><span class="sheet-person-name">${a.title}</span>${a.sub ? `<span class="sheet-person-time">${a.sub}</span>` : ""}</span>
+        </button>`).join("")}
+    </div>`);
+  sheetBody.querySelectorAll("[data-action]").forEach((btn) => btn.addEventListener("click", async () => {
+    const action = btn.dataset.action;
+    closeSheet();
+    if (action === "edit") startEdit(m);
+    else if (action === "delete") deleteMessage(m.id);
+    else if (action === "pin") togglePin(m);
+    else if (action === "renotify") renotify(m);
+  }));
+}
+
+async function togglePin(m) {
+  try {
+    const res = await apiFetch(`/admin/message/${m.id}/pin`, { method: "POST" });
+    if (!res.ok) return handleResponseError(res, "Не удалось закрепить");
+    const { isPinned } = await res.json();
+    m.isPinned = isPinned;
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+    renderFilteredMessages({ flash: [m.id] });
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка соединения");
+  }
+}
+
+async function renotify(m) {
+  if (!confirm("Отправить уведомление об этой записи всем ещё раз?")) return;
+  try {
+    const res = await apiFetch(`/admin/message/${m.id}/renotify`, { method: "POST" });
+    if (!res.ok) return handleResponseError(res, "Не удалось отправить");
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+    alert("Готово: уведомления отправляются.");
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка соединения");
+  }
+}
+
+// ============================================================
+// QUESTIONS UNDER A TASK (bottom sheet)
+// ============================================================
+function commentHtml(c) {
+  const time = new Date(c.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return `
+    <div class="comment ${c.isStaff ? "staff" : ""} ${c.userId === currentUser.id ? "mine" : ""}" data-comment="${c.id}">
+      <div class="comment-head">
+        <span class="comment-author">${escapeHtml(c.author)}${c.isStaff ? '<span class="role-pill admin">староста</span>' : ""}</span>
+        <span class="comment-time">${time}</span>
+        ${c.canDelete ? `<button type="button" class="msg-action-btn comment-delete" title="Удалить">${icon("close")}</button>` : ""}
+      </div>
+      <div class="comment-text">${escapeHtml(c.text).replace(/\n/g, "<br>")}</div>
+    </div>`;
+}
+
+function updateCommentCount(m, count) {
+  m.commentCount = count;
+  const chip = messagesContainer.querySelector(`.message-card[data-id="${m.id}"] .comments-chip`);
+  if (chip) chip.innerHTML = commentsChipHtml(count);
+  writeCache(`cache-msgs-${currentGroupId}`, cachedMessages);
+}
+
+async function openCommentsSheet(m) {
+  openSheet("Вопросы", plainPreview(m.text).slice(0, 80), `
+    <div id="commentsList" class="comments-list">${skeleton("user", 2)}</div>
+    <form id="commentForm" class="comment-form">
+      <textarea id="commentInput" rows="1" maxlength="1000" placeholder="Спросить у старосты…"></textarea>
+      <button type="submit" class="send-btn" title="Отправить">${icon("send")}</button>
+    </form>`);
+  const list = document.getElementById("commentsList");
+  const form = document.getElementById("commentForm");
+  const input = document.getElementById("commentInput");
+  let comments = [];
+
+  const render = () => {
+    list.innerHTML = comments.length
+      ? comments.map(commentHtml).join("")
+      : '<div class="sheet-empty">Вопросов пока нет. Спросите — ответ увидит вся группа.</div>';
+    list.querySelectorAll(".comment-delete").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = Number(btn.closest("[data-comment]").dataset.comment);
+      if (!confirm("Удалить сообщение?")) return;
+      const res = await apiFetch(`/admin/comments/${id}`, { method: "DELETE" }).catch(() => null);
+      if (!res?.ok) return alert("Не удалось удалить");
+      comments = comments.filter((c) => c.id !== id);
+      updateCommentCount(m, comments.length);
+      render();
+    }));
+    list.scrollTop = list.scrollHeight;
+  };
+
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      const res = await apiFetch(`/admin/message/${m.id}/comments`, { method: "POST", body: JSON.stringify({ text }) });
+      if (!res.ok) return handleResponseError(res, "Не удалось отправить");
+      comments.push(await res.json());
+      input.value = "";
+      input.style.height = "auto";
+      updateCommentCount(m, comments.length);
+      render();
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+    } catch (err) {
+      console.error(err);
+      alert("Нет соединения — сообщение не отправлено");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  try {
+    const res = await apiFetch(`/admin/message/${m.id}/comments`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    comments = await res.json();
+    if (comments.length !== (m.commentCount || 0)) updateCommentCount(m, comments.length);
+    render();
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = '<div class="sheet-empty">Не удалось загрузить вопросы.</div>';
+  }
 }
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -880,7 +1131,7 @@ async function toggleTaskComplete(msgId) {
       card.querySelector(".deadline-slot").innerHTML = formatDeadlineBadge(msg.deadline, msg.isCompleted);
       if (msg.completedCount != null && currentUser.role === "Admin") {
         msg.completedCount += msg.isCompleted ? 1 : -1;
-        const chip = card.querySelector(".done-count-chip span");
+        const chip = card.querySelector(".done-count-chip:not(.comments-chip) span");
         if (chip) chip.textContent = `${msg.completedCount}/${msg.studentsTotal}`;
       }
     } else if (card) {
@@ -1462,15 +1713,23 @@ deadlineFilterTabs.forEach((tab) => {
 deadlinesSummaryCard?.addEventListener("click", () => switchScreen("deadlinesScreen"));
 
 async function loadDeadlinesScreen(silent = false) {
-  if (!silent || cachedDeadlines.length === 0) deadlinesList.innerHTML = skeleton("deadline", 4);
+  if (cachedDeadlines.length === 0) {
+    const saved = readCache("cache-deadlines");
+    if (Array.isArray(saved) && saved.length) cachedDeadlines = saved;
+  }
+  if (cachedDeadlines.length) renderDeadlines();
+  else if (!silent) deadlinesList.innerHTML = skeleton("deadline", 4);
   try {
     const res = await apiFetch("/admin/my-deadlines");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     cachedDeadlines = await res.json();
+    writeCache("cache-deadlines", cachedDeadlines);
     renderDeadlines();
   } catch (err) {
     console.error(err);
-    deadlinesList.innerHTML = '<div class="empty-state">Не удалось загрузить дедлайны. Потяните вниз, чтобы повторить.</div>';
+    if (cachedDeadlines.length === 0) {
+      deadlinesList.innerHTML = '<div class="empty-state">Не удалось загрузить дедлайны. Потяните вниз, чтобы повторить.</div>';
+    }
   }
 }
 
@@ -1637,6 +1896,184 @@ async function toggleDeadlineItem(d, item) {
   } finally {
     check.disabled = false;
   }
+}
+
+// ============================================================
+// TODAY & TIMETABLE
+// ============================================================
+const todayCard = document.getElementById("todayCard");
+const WEEKDAYS = ["", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
+const isStaffRole = () => currentUser.role === "Admin" || currentUser.role === "Developer";
+let todayData = null;
+
+async function loadToday() {
+  try {
+    const res = await apiFetch("/admin/schedule/today");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    todayData = await res.json();
+    writeCache("cache-today", todayData);
+    renderToday();
+  } catch (err) {
+    console.warn("Could not load today:", err);
+  }
+}
+
+function restoreTodayFromCache() {
+  const saved = readCache("cache-today");
+  if (saved) {
+    todayData = saved;
+    renderToday();
+  }
+}
+
+function lessonTimeHtml(l) {
+  return `<span class="lesson-time"><b>${l.start}</b><span>${l.end}</span></span>`;
+}
+
+function renderToday() {
+  const data = todayData;
+  if (!data || data.lessons.length === 0) {
+    // Students see nothing while there is no timetable; staff get an invitation to fill it
+    todayCard.classList.toggle("hidden", !isStaffRole());
+    todayCard.innerHTML = `
+      <button type="button" class="today-empty" id="openScheduleBtn">
+        <span class="summary-icon">${icon("calendar")}</span>
+        <span class="today-empty-text"><b>Расписание пар</b><span>Добавьте пары — студенты увидят, что задано к каждой</span></span>
+        ${icon("chevronRight")}
+      </button>`;
+    document.getElementById("openScheduleBtn").addEventListener("click", openScheduleSheet);
+    return;
+  }
+
+  const date = new Date(`${data.date}T12:00:00`);
+  const dateText = date.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  const todayIso = formatInputDateTime(new Date()).slice(0, 10); // local date, not UTC
+  const daysAhead = Math.round((startOfDay(date) - startOfDay(new Date())) / DAY_MS);
+  const label = daysAhead <= 0 ? "Сегодня" : daysAhead === 1 ? "Завтра" : "Ближайшие пары";
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+  todayCard.classList.remove("hidden");
+  todayCard.innerHTML = `
+    <div class="today-head">
+      <div><span class="today-label">${label}</span><span class="today-date">${dateText}</span></div>
+      <button type="button" class="today-week-btn" id="openScheduleBtn">${icon("calendar")}Неделя</button>
+    </div>
+    <div class="today-lessons">
+      ${data.lessons.map(({ lesson: l, pendingCount, pending }) => {
+        const isNow = data.date === todayIso && toMin(l.start) <= nowMinutes && nowMinutes < toMin(l.end);
+        return `
+        <button type="button" class="today-lesson ${isNow ? "now" : ""}" data-group="${l.groupId}">
+          ${lessonTimeHtml(l)}
+          <span class="lesson-body">
+            <span class="lesson-name">${escapeHtml(l.groupName)}${l.room ? `<span class="lesson-room">${escapeHtml(l.room)}</span>` : ""}</span>
+            <span class="lesson-tasks">${pendingCount === 0
+              ? "Ничего не задано"
+              : escapeHtml(pending[0].text) + (pendingCount > 1 ? ` · ещё ${pendingCount - 1}` : "")}</span>
+          </span>
+          ${pendingCount > 0 ? `<span class="group-count-badge">${pendingCount}</span>` : ""}
+        </button>`;
+      }).join("")}
+    </div>`;
+
+  document.getElementById("openScheduleBtn").addEventListener("click", openScheduleSheet);
+  todayCard.querySelectorAll("[data-group]").forEach((btn) => btn.addEventListener("click", () => {
+    const groupId = Number(btn.dataset.group);
+    const group = cachedGroups.find((g) => g.id === groupId);
+    openChat(groupId, group?.name || "Предмет", group?.description, { kind: "homework" });
+  }));
+}
+
+async function openScheduleSheet() {
+  openSheet("Расписание", "Пары на неделю", skeleton("user", 3));
+  let week = [];
+  try {
+    const res = await apiFetch("/admin/schedule");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    week = await res.json();
+  } catch (err) {
+    console.error(err);
+    sheetBody.innerHTML = '<div class="sheet-empty">Не удалось загрузить расписание.</div>';
+    return;
+  }
+
+  const render = () => {
+    const days = [1, 2, 3, 4, 5, 6, 7].filter((d) => week.some((l) => l.dayOfWeek === d));
+    const listHtml = days.length === 0
+      ? '<div class="sheet-empty">Пар пока нет.</div>'
+      : days.map((d) => `
+        <div class="sheet-section-title">${WEEKDAYS[d]}</div>
+        <div class="sheet-people">
+          ${week.filter((l) => l.dayOfWeek === d).map((l) => `
+            <div class="sheet-person schedule-row">
+              ${lessonTimeHtml(l)}
+              <span class="sheet-person-name">${escapeHtml(l.groupName)}${l.room ? ` <span class="lesson-room">${escapeHtml(l.room)}</span>` : ""}</span>
+              ${isStaffRole() ? `<button type="button" class="msg-action-btn" data-delete-lesson="${l.id}" title="Удалить пару">${icon("close")}</button>` : ""}
+            </div>`).join("")}
+        </div>`).join("");
+
+    const formHtml = !isStaffRole() ? "" : `
+      <div class="sheet-section-title">Добавить пару</div>
+      <form id="lessonForm" class="lesson-form">
+        <select id="lessonGroup" class="form-select" required>
+          ${cachedGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("")}
+        </select>
+        <select id="lessonDay" class="form-select">
+          ${WEEKDAYS.slice(1, 7).map((name, i) => `<option value="${i + 1}">${name}</option>`).join("")}
+        </select>
+        <div class="lesson-form-row">
+          <input type="time" id="lessonStart" class="time-input" value="08:30" required />
+          <span>–</span>
+          <input type="time" id="lessonEnd" class="time-input" value="09:50" required />
+        </div>
+        <input type="text" id="lessonRoom" class="form-input" maxlength="50" placeholder="Аудитория (необязательно)" />
+        <button type="submit" class="btn primary-btn">${icon("plus")}Добавить</button>
+      </form>`;
+
+    sheetBody.innerHTML = listHtml + formHtml;
+
+    sheetBody.querySelectorAll("[data-delete-lesson]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.deleteLesson);
+      const res = await apiFetch(`/admin/schedule/${id}`, { method: "DELETE" }).catch(() => null);
+      if (!res?.ok) return alert("Не удалось удалить пару");
+      week = week.filter((l) => l.id !== id);
+      render();
+      loadToday();
+    }));
+
+    const form = document.getElementById("lessonForm");
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const body = {
+        groupId: Number(document.getElementById("lessonGroup").value),
+        dayOfWeek: Number(document.getElementById("lessonDay").value),
+        start: document.getElementById("lessonStart").value,
+        end: document.getElementById("lessonEnd").value,
+        room: document.getElementById("lessonRoom").value
+      };
+      const button = form.querySelector("button[type=submit]");
+      button.disabled = true;
+      try {
+        const res = await apiFetch("/admin/schedule", { method: "POST", body: JSON.stringify(body) });
+        if (!res.ok) return handleResponseError(res, "Не удалось добавить пару");
+        week.push(await res.json());
+        week.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.start.localeCompare(b.start));
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+        // Next lesson: same day, the following time slot
+        const keepDay = body.dayOfWeek;
+        render();
+        document.getElementById("lessonDay").value = String(keepDay);
+        document.getElementById("lessonGroup").value = String(body.groupId);
+        loadToday();
+      } catch (err) {
+        console.error(err);
+        alert("Ошибка соединения");
+      } finally {
+        button.disabled = false;
+      }
+    });
+  };
+  render();
 }
 
 // ============================================================
@@ -1870,6 +2307,7 @@ async function openStudentSheet(telegramId) {
 // ============================================================
 const notif = {
   newTasks: document.getElementById("notifNewTasks"),
+  deadlines: document.getElementById("notifDeadlines"),
   autoDelete: document.getElementById("notifAutoDelete"),
   quiet: document.getElementById("notifQuiet"),
   quietFrom: document.getElementById("quietFrom"),
@@ -1894,8 +2332,9 @@ function showNotifStatus(text, tone = "ok", sticky = false) {
 /** Dependent controls are dimmed when "Новые задания" is off */
 function syncNotifUI() {
   const on = notif.newTasks.checked;
-  notif.details.classList.toggle("disabled", !on);
-  notif.subjectsBlock.classList.toggle("disabled", !on);
+  notif.details.classList.toggle("disabled", !on && !notif.deadlines.checked);
+  // Muted subjects apply to reminders too
+  notif.subjectsBlock.classList.toggle("disabled", !on && !notif.deadlines.checked);
   notif.quietTimes.classList.toggle("hidden", !notif.quiet.checked);
 }
 
@@ -1912,6 +2351,7 @@ async function loadNotificationSettings() {
 
 function renderNotificationSettings(data) {
   notif.newTasks.checked = data.newTasks;
+  notif.deadlines.checked = data.deadlineReminders ?? true;
   notif.autoDelete.checked = data.autoDelete;
   notif.quiet.checked = data.quietHoursEnabled;
   notif.quietFrom.value = data.quietFrom;
@@ -1941,6 +2381,7 @@ function onNotifChanged() {
 async function saveNotificationSettings() {
   const body = {
     newTasks: notif.newTasks.checked,
+    deadlineReminders: notif.deadlines.checked,
     autoDelete: notif.autoDelete.checked,
     quietHoursEnabled: notif.quiet.checked,
     quietFrom: notif.quietFrom.value || "22:00",
@@ -1963,7 +2404,7 @@ async function saveNotificationSettings() {
   }
 }
 
-[notif.newTasks, notif.autoDelete, notif.quiet, notif.quietFrom, notif.quietTo].forEach((el) =>
+[notif.newTasks, notif.deadlines, notif.autoDelete, notif.quiet, notif.quietFrom, notif.quietTo].forEach((el) =>
   el.addEventListener("change", onNotifChanged));
 
 notif.testBtn.addEventListener("click", async () => {

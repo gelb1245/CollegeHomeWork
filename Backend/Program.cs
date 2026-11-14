@@ -115,7 +115,11 @@ builder.Services.AddSwaggerGen();
 
 // 7. Security & Business Services
 builder.Services.AddSingleton<TelegramRateLimiter>();
-builder.Services.AddSingleton<WhitelistService>();
+builder.Services.AddSingleton(sp => new WhitelistService(
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<WhitelistService>>(),
+    // Imported once into an empty WhitelistEntries table, never written again
+    Path.Combine(builder.Environment.ContentRootPath, "whitelist.json")));
 // Bot token is read ONLY from the environment / user secrets / non-committed config.
 // Never hard-code it: anyone with access to the repository could take over the bot.
 var botToken = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN")
@@ -152,6 +156,7 @@ builder.Services.AddHostedService<BotUpdatesService>();
 // Background services: 24-hour notification auto-deleter, keep-alive
 
 builder.Services.AddHostedService<NotificationCleanupService>();
+builder.Services.AddHostedService<DeadlineReminderService>();
 builder.Services.AddHostedService<KeepAliveService>();
 
 var app = builder.Build();
@@ -247,5 +252,6 @@ using (var scope = app.Services.CreateScope())
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     await DatabaseInitializer.InitializeAsync(db, logger);
 }
+await app.Services.GetRequiredService<WhitelistService>().InitializeAsync();
 
 app.Run();

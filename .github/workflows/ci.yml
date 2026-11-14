@@ -1,0 +1,35 @@
+name: CI
+
+# Every push and pull request: build the backend, run all tests, check the Mini App script.
+# A red cross in GitHub means: do not deploy this commit.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore CollegeHomeWork.sln
+
+      - name: Build
+        run: dotnet build CollegeHomeWork.sln --no-restore -c Release -warnaserror
+
+      - name: Test
+        run: dotnet test CollegeHomeWork.sln --no-build -c Release --logger "console;verbosity=normal"
+
+      - name: Check Mini App script syntax
+        run: node --check Frontend/app.js

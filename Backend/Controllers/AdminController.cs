@@ -188,7 +188,7 @@ public class AdminController : ControllerBase
         if (!Enum.TryParse<RoleType>(dto.Role, true, out var role))
             role = RoleType.User;
 
-        _whitelist.Add(dto.TelegramId);
+        await _whitelist.AddAsync(dto.TelegramId, cancellationToken);
 
         var existing = await _db.Users.FindAsync(new object[] { dto.TelegramId }, cancellationToken);
         if (existing == null)
@@ -245,7 +245,7 @@ public class AdminController : ControllerBase
             return BadRequest("Нельзя удалить главного создателя бота.");
         }
 
-        _whitelist.Remove(telegramId);
+        await _whitelist.RemoveAsync(telegramId, cancellationToken);
 
         var user = await _db.Users.FindAsync(new object[] { telegramId }, cancellationToken);
         if (user != null)
